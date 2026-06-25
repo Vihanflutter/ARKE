@@ -611,17 +611,6 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
               Office Parameters
             </button>
           </div>
-
-          <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/60">
-            <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Sandbox Database</span>
-            <button 
-              onClick={handleResetDbToSeed}
-              className="w-full text-left text-xs bg-white hover:bg-slate-50 border border-slate-200 rounded p-1.5 font-semibold text-slate-600 transition flex items-center gap-1 justify-center cursor-pointer"
-            >
-              <RefreshCw className="w-3 h-3" />
-              Restore Original Seed
-            </button>
-          </div>
         </aside>
 
         {/* Main Workspace Frame */}
