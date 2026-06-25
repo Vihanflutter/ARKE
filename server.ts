@@ -345,8 +345,12 @@ async function startServer() {
         const hours = parseFloat(((outSecs - inSecs) / 3600).toFixed(2));
 
         let status: AttendanceStatus = 'PRESENT';
-        if (hours < settings.halfDayHours) {
+        if (hours >= 8.0) {
+          status = 'PRESENT';
+        } else if (hours >= 4.0) {
           status = 'HALF_DAY';
+        } else {
+          status = 'LEAVE';
         }
 
         const updated = db.attendances.upsert(userId, todayStr, {
