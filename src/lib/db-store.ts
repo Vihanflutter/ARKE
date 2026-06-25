@@ -60,6 +60,95 @@ function ensureRequiredDepartments(dbData: DatabaseSchema) {
   }
 }
 
+// Self-heal database to prevent duplicate user IDs (especially after deletions or manual imports)
+function selfHealDatabase(dbData: DatabaseSchema) {
+  if (!dbData || !Array.isArray(dbData.users)) return;
+
+  const seenIds = new Set<string>();
+  let modified = false;
+
+  // We keep a mapping of original array index to its new ID (if changed)
+  const changedIds: { index: number; oldId: string; newId: string }[] = [];
+
+  for (let i = 0; i < dbData.users.length; i++) {
+    const user = dbData.users[i];
+    if (!user.id) {
+      user.id = `usr-emp${String(i + 1).padStart(3, '0')}`;
+      modified = true;
+    }
+
+    if (seenIds.has(user.id)) {
+      const oldId = user.id;
+      // Duplicate ID detected! Generate a guaranteed unique ID
+      const ids = dbData.users.map(u => {
+        const match = u.id.match(/^usr-emp(\d+)$/i);
+        return match ? parseInt(match[1], 10) : 0;
+      });
+      // Include already seen IDs
+      seenIds.forEach(id => {
+        const match = id.match(/^usr-emp(\d+)$/i);
+        if (match) ids.push(parseInt(match[1], 10));
+      });
+      const maxId = ids.length > 0 ? Math.max(...ids) : 0;
+      const nextId = `usr-emp${String(maxId + 1).padStart(3, '0')}`;
+
+      console.log(`Self-healing: Found duplicate/invalid ID ${oldId} for user ${user.name} (Emp ID: ${user.employeeId}). Reassigning to ${nextId}`);
+      user.id = nextId;
+      changedIds.push({ index: i, oldId, newId: nextId });
+      modified = true;
+    }
+    seenIds.add(user.id);
+  }
+
+  // If we changed any user IDs, let's duplicate/map their historical attendance & leaves
+  if (changedIds.length > 0) {
+    if (!dbData.attendances) dbData.attendances = [];
+    if (!dbData.leaveRequests) dbData.leaveRequests = [];
+
+    changedIds.forEach(({ oldId, newId, index }) => {
+      // Duplicate attendance records that belong to oldId so newId gets its copy
+      const oldAtts = dbData.attendances.filter(a => a.userId === oldId);
+      oldAtts.forEach(att => {
+        const exists = dbData.attendances.some(a => a.userId === newId && a.date === att.date);
+        if (!exists) {
+          dbData.attendances.push({
+            ...att,
+            id: `att-${newId}-${att.date}`,
+            userId: newId,
+            updatedAt: new Date().toISOString()
+          });
+        }
+      });
+
+      // Duplicate leave requests belonging to oldId so newId gets its copy
+      const oldLeaves = dbData.leaveRequests.filter(l => l.userId === oldId);
+      oldLeaves.forEach(leave => {
+        const exists = dbData.leaveRequests.some(l => l.userId === newId && l.startDate === leave.startDate && l.endDate === leave.endDate);
+        if (!exists) {
+          // Generate a safe unique leave ID
+          const leaveIds = dbData.leaveRequests.map(l => {
+            const match = l.id.match(/^leave-(\d+)$/i);
+            return match ? parseInt(match[1], 10) : 0;
+          });
+          const maxLeaveId = leaveIds.length > 0 ? Math.max(...leaveIds) : 0;
+          const nextLeaveId = `leave-${maxLeaveId + 1}`;
+
+          dbData.leaveRequests.push({
+            ...leave,
+            id: nextLeaveId,
+            userId: newId,
+            updatedAt: new Date().toISOString()
+          });
+        }
+      });
+    });
+  }
+
+  if (modified) {
+    saveDb(dbData);
+  }
+}
+
 // Asynchronously load DB from Postgres or fallback file at server startup
 export async function initDb(): Promise<DatabaseSchema> {
   if (memoryDb) return memoryDb;
@@ -89,12 +178,14 @@ export async function initDb(): Promise<DatabaseSchema> {
         memoryDb = JSON.parse(res.rows[0].value);
         console.log('Successfully loaded database state from PostgreSQL.');
         ensureRequiredDepartments(memoryDb!);
+        selfHealDatabase(memoryDb!);
         return memoryDb!;
       } else {
         console.log('PostgreSQL store is empty. Seeding with initial data...');
         const seed = getSeedData();
         memoryDb = seed;
         ensureRequiredDepartments(seed);
+        selfHealDatabase(seed);
         await pgPool.query(
           "INSERT INTO _kv_store (key, value) VALUES ('db_json', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
           [JSON.stringify(seed)]
@@ -127,6 +218,7 @@ function getDbFileContent(): DatabaseSchema {
         const fileContent = fsModule.readFileSync(resolvedPath, 'utf-8');
         memoryDb = JSON.parse(fileContent);
         ensureRequiredDepartments(memoryDb!);
+        selfHealDatabase(memoryDb!);
         return memoryDb!;
       }
     } catch (err) {
@@ -141,6 +233,7 @@ function getDbFileContent(): DatabaseSchema {
       if (stored) {
         memoryDb = JSON.parse(stored);
         ensureRequiredDepartments(memoryDb!);
+        selfHealDatabase(memoryDb!);
         return memoryDb!;
       }
     } catch (e) {
@@ -153,6 +246,7 @@ function getDbFileContent(): DatabaseSchema {
   const seed = getSeedData();
   memoryDb = seed;
   ensureRequiredDepartments(seed);
+  selfHealDatabase(seed);
   saveDb(seed);
   return seed;
 }
@@ -207,8 +301,19 @@ export const db = {
     },
     create: (data: Omit<User, 'id' | 'createdAt' | 'updatedAt' | 'joiningDate'> & { id?: string, joiningDate?: string }): User => {
       const dbData = getDbFileContent();
+      
+      let finalId = data.id;
+      if (!finalId) {
+        const ids = dbData.users.map(u => {
+          const match = u.id.match(/^usr-emp(\d+)$/i);
+          return match ? parseInt(match[1], 10) : 0;
+        });
+        const maxId = ids.length > 0 ? Math.max(...ids) : 0;
+        finalId = `usr-emp${String(maxId + 1).padStart(3, '0')}`;
+      }
+
       const newUser: User = {
-        id: data.id || `usr-emp${String(dbData.users.length + 1).padStart(3, '0')}`,
+        id: finalId,
         joiningDate: data.joiningDate || new Date().toISOString().split('T')[0],
         ...data,
         createdAt: new Date().toISOString(),
@@ -376,8 +481,19 @@ export const db = {
     },
     create: (data: Omit<LeaveRequest, 'id' | 'createdAt' | 'updatedAt' | 'status'> & { id?: string }): LeaveRequest => {
       const dbData = getDbFileContent();
+      
+      let finalId = data.id;
+      if (!finalId) {
+        const ids = dbData.leaveRequests.map(l => {
+          const match = l.id.match(/^leave-(\d+)$/i);
+          return match ? parseInt(match[1], 10) : 0;
+        });
+        const maxId = ids.length > 0 ? Math.max(...ids) : 0;
+        finalId = `leave-${maxId + 1}`;
+      }
+
       const newLeave: LeaveRequest = {
-        id: data.id || `leave-${dbData.leaveRequests.length + 1}`,
+        id: finalId,
         status: 'PENDING',
         ...data,
         createdAt: new Date().toISOString(),
