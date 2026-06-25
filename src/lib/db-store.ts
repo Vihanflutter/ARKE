@@ -14,6 +14,7 @@ let memoryDb: DatabaseSchema | null = null;
 const isServer = typeof window === 'undefined';
 let fsModule: any = null;
 let pathModule: any = null;
+let pgPool: any = null;
 
 const DB_FILE_PATH = './data/db.json';
 
@@ -56,6 +57,57 @@ function ensureRequiredDepartments(dbData: DatabaseSchema) {
   if (modified) {
     saveDb(dbData);
   }
+}
+
+// Asynchronously load DB from Postgres or fallback file at server startup
+export async function initDb(): Promise<DatabaseSchema> {
+  if (memoryDb) return memoryDb;
+
+  const dbUrl = process.env.DATABASE_URL;
+  if (isServer && dbUrl) {
+    try {
+      console.log('PostgreSQL DATABASE_URL found. Initializing PostgreSQL store...');
+      const { Pool } = eval('require')('pg');
+      
+      pgPool = new Pool({
+        connectionString: dbUrl,
+        ssl: dbUrl.includes('localhost') ? false : { rejectUnauthorized: false }
+      });
+
+      // Create table if not exists
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS _kv_store (
+          key VARCHAR(255) PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+      `);
+
+      // Load data
+      const res = await pgPool.query("SELECT value FROM _kv_store WHERE key = 'db_json'");
+      if (res.rows.length > 0) {
+        memoryDb = JSON.parse(res.rows[0].value);
+        console.log('Successfully loaded database state from PostgreSQL.');
+        ensureRequiredDepartments(memoryDb!);
+        return memoryDb!;
+      } else {
+        console.log('PostgreSQL store is empty. Seeding with initial data...');
+        const seed = getSeedData();
+        memoryDb = seed;
+        ensureRequiredDepartments(seed);
+        await pgPool.query(
+          "INSERT INTO _kv_store (key, value) VALUES ('db_json', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+          [JSON.stringify(seed)]
+        );
+        console.log('PostgreSQL store seeded successfully.');
+        return seed;
+      }
+    } catch (err) {
+      console.error('Failed to initialize or read from PostgreSQL store. Falling back to local file.', err);
+    }
+  }
+
+  // Local file loading fallback if no PostgreSQL
+  return getDbFileContent();
 }
 
 function getDbFileContent(): DatabaseSchema {
@@ -106,14 +158,33 @@ function getDbFileContent(): DatabaseSchema {
 
 function saveDb(data: DatabaseSchema) {
   memoryDb = data;
-  if (isServer && fsModule && pathModule) {
+  if (isServer) {
+    // 1. Write to local file backup
     try {
-      const resolvedPath = pathModule.resolve(DB_FILE_PATH);
-      fsModule.writeFileSync(resolvedPath, JSON.stringify(data, null, 2), 'utf-8');
+      if (fsModule && pathModule) {
+        const resolvedPath = pathModule.resolve(DB_FILE_PATH);
+        const dirPath = pathModule.dirname(resolvedPath);
+        if (!fsModule.existsSync(dirPath)) {
+          fsModule.mkdirSync(dirPath, { recursive: true });
+        }
+        fsModule.writeFileSync(resolvedPath, JSON.stringify(data, null, 2), 'utf-8');
+      }
     } catch (err) {
-      console.error('Failed writing DB file', err);
+      console.error('Failed writing local DB file backup', err);
     }
-  } else if (!isServer) {
+
+    // 2. Write to PostgreSQL in the background if active
+    if (pgPool) {
+      pgPool.query(
+        "INSERT INTO _kv_store (key, value) VALUES ('db_json', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+        [JSON.stringify(data)]
+      ).then(() => {
+        // Successfully persisted in the cloud
+      }).catch((err: any) => {
+        console.error('Failed to save database state to PostgreSQL:', err);
+      });
+    }
+  } else {
     try {
       localStorage.setItem('db_store', JSON.stringify(data));
     } catch (e) {

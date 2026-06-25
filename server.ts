@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { z } from 'zod';
-import { db } from './src/lib/db-store';
+import { db, initDb } from './src/lib/db-store';
 import { AttendanceStatus } from './src/types';
 
 // Helper function to get current date and time in Indian Standard Time (IST)
@@ -30,6 +30,9 @@ function getISTDateAndTime(): { dateStr: string; timeStr: string } {
 }
 
 async function startServer() {
+  // Initialize Database from Postgres or local fallback
+  await initDb();
+
   const app = express();
   const PORT = 3000;
 
