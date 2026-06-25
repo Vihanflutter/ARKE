@@ -17,21 +17,43 @@ export default function App() {
     const initAndSync = async () => {
       try {
         // 1. Fetch server status to see if it's default seed (newly redeployed/reset)
-        const status = await apiRequest<{ isDefaultSeed: boolean }>('/api/system/status', 'GET');
+        const status = await apiRequest<{ isDefaultSeed: boolean; userCount?: number }>('/api/system/status', 'GET');
         
-        if (status.isDefaultSeed && active) {
+        if (active) {
           // Check if there is a local client-side backup stored in the browser
-          const backupStr = localStorage.getItem('arke_db_backup');
+          let backupStr = localStorage.getItem('arke_db_backup');
+          let backup = null;
           if (backupStr) {
             try {
-              const backup = JSON.parse(backupStr);
-              if (backup && backup.users && backup.users.length > 0) {
-                console.log('Detected clean/re-seeded server. Restoring your manual entries automatically...');
-                await apiRequest('/api/system/restore', 'POST', backup);
-                console.log('Automatic restore complete.');
+              backup = JSON.parse(backupStr);
+            } catch (e) {}
+          }
+
+          // Fallback to db_store (client-side DB representation) if arke_db_backup is missing or smaller
+          const dbStoreStr = localStorage.getItem('db_store');
+          if (dbStoreStr) {
+            try {
+              const dbStore = JSON.parse(dbStoreStr);
+              if (dbStore && Array.isArray(dbStore.users) && (!backup || !Array.isArray(backup.users) || dbStore.users.length > backup.users.length)) {
+                backup = dbStore;
+                console.log('[Restore] Selected db_store as the optimal restore backup since it has more users.');
               }
-            } catch (err) {
-              console.error('Failed to restore from local backup:', err);
+            } catch (e) {}
+          }
+
+          // If the server is in a default seed state or has fewer users, automatically restore from our larger local backup
+          if (backup && Array.isArray(backup.users) && backup.users.length > 0) {
+            const hasMoreUsers = status.isDefaultSeed || (status.userCount && backup.users.length > status.userCount);
+            if (hasMoreUsers) {
+              try {
+                console.log('Detected clean/re-seeded server or larger local backup. Restoring your manual entries automatically...');
+                const res = await apiRequest<{ success: boolean }>('/api/system/restore', 'POST', backup);
+                if (res.success) {
+                  console.log('Automatic restore complete. All users and data recovered.');
+                }
+              } catch (err) {
+                console.error('Failed to restore from local backup:', err);
+              }
             }
           }
         }
@@ -88,7 +110,24 @@ export default function App() {
     const doBackup = async () => {
       try {
         const dbData = await apiRequest<any>('/api/system/export', 'GET');
-        if (dbData && dbData.users && dbData.users.length > 0) {
+        if (dbData && Array.isArray(dbData.users) && dbData.users.length > 0) {
+          // Check if there is an existing local backup in the browser
+          const existingBackupStr = localStorage.getItem('arke_db_backup');
+          if (existingBackupStr) {
+            try {
+              const existingBackup = JSON.parse(existingBackupStr);
+              if (existingBackup && Array.isArray(existingBackup.users)) {
+                // CRITICAL SAFEGUARD: If the new export from the server has FEWER users than what we already have backed up,
+                // we should NOT overwrite our good local backup (the server was probably reset/re-seeded).
+                if (dbData.users.length < existingBackup.users.length) {
+                  console.log('[Backup] Skipping backup: server has fewer users than local backup. Preserving local backup.');
+                  return;
+                }
+              }
+            } catch (e) {
+              console.error('[Backup] Failed parsing existing backup:', e);
+            }
+          }
           localStorage.setItem('arke_db_backup', JSON.stringify(dbData));
         }
       } catch (err) {

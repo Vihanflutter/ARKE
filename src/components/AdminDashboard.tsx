@@ -6,7 +6,7 @@ import {
   Role, EmployeeStatus, AttendanceStatus, LeaveType, LeaveStatus
 } from '../types';
 import { 
-  Users, UserCheck, UserMinus, CalendarClock, Download, Search, Plus, Edit, Trash, LockKeyhole,
+  Users, UserCheck, UserMinus, CalendarClock, Download, Upload, Search, Plus, Edit, Trash, LockKeyhole,
   CheckCircle, XCircle, Settings, ShieldAlert, FileText, ChevronRight, Filter, AlertCircle, RefreshCw, LogOut, Check, X,
   FolderTree, Briefcase, Eye, EyeOff
 } from 'lucide-react';
@@ -433,6 +433,71 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
         }
       }
     );
+  };
+
+  const handleDownloadBackup = async () => {
+    setOperationLoading(true);
+    try {
+      const data = await apiRequest<any>('/api/system/export', 'GET');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `etimeoffice_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showMsg('success', 'Database backup downloaded successfully!');
+    } catch (err: any) {
+      showMsg('error', 'Failed to download backup: ' + (err.message || err));
+    } finally {
+      setOperationLoading(false);
+    }
+  };
+
+  const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const backup = JSON.parse(event.target?.result as string);
+        if (!backup || !Array.isArray(backup.users)) {
+          showMsg('error', 'Invalid backup format. Must be a valid JSON file containing users.');
+          return;
+        }
+        
+        triggerConfirm(
+          'Restore Database Backup',
+          `Are you sure you want to restore this backup file? It will replace all current users, attendances, leaves, and settings with ${backup.users.length} users from the file.`,
+          async () => {
+            setOperationLoading(true);
+            try {
+              const res = await apiRequest<{ success: boolean; message?: string }>('/api/system/restore', 'POST', backup);
+              if (res.success) {
+                // Also update local copy in browser so we keep it in sync
+                localStorage.setItem('arke_db_backup', JSON.stringify(backup));
+                showMsg('success', res.message || 'Database state restored successfully!');
+                setTimeout(() => {
+                  window.location.reload();
+                }, 1500);
+              }
+            } catch (err: any) {
+              showMsg('error', 'Failed to restore backup: ' + (err.message || err));
+            } finally {
+              setOperationLoading(false);
+            }
+          }
+        );
+      } catch (err: any) {
+        showMsg('error', 'Failed to parse JSON backup file: ' + (err.message || err));
+      }
+    };
+    reader.readAsText(file);
+    // Clear input value so same file can be imported again
+    e.target.value = '';
   };
 
   // --- REPORTS DYNAMIC CALCULATIONS & DUMP ---
@@ -1395,6 +1460,50 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                         </button>
                       </form>
                     </div>
+
+                    <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm max-w-xl">
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                          <ShieldAlert className="w-4 h-4 text-slate-500" />
+                          System Backup & Disaster Recovery
+                        </h3>
+                        <p className="text-[11px] text-slate-500 mt-1">
+                          Export your database to a JSON file on your desktop, or restore a backup file to instantly recover all employees and attendance sheets.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                        <button
+                          onClick={handleDownloadBackup}
+                          disabled={operationLoading}
+                          className="flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-900 font-semibold text-xs px-4 py-2.5 rounded-lg border border-slate-200 transition cursor-pointer disabled:opacity-50"
+                        >
+                          <Download className="w-4 h-4 text-slate-600" /> Export DB Backup
+                        </button>
+                        
+                        <label className="flex items-center justify-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs px-4 py-2.5 rounded-lg shadow-sm transition cursor-pointer text-center disabled:opacity-50">
+                          <Upload className="w-4 h-4" /> Import DB Backup
+                          <input
+                            type="file"
+                            accept=".json"
+                            disabled={operationLoading}
+                            onChange={handleImportBackup}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="border-t border-slate-100 pt-4 mt-4">
+                        <button
+                          onClick={handleResetDbToSeed}
+                          disabled={operationLoading}
+                          className="flex items-center justify-center gap-1.5 text-red-600 hover:text-red-700 font-semibold text-[11px] hover:underline cursor-pointer disabled:opacity-50"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" /> Revert Database to Clean Seed State
+                        </button>
+                      </div>
+                    </div>
+
                   </div>
                 )}
 
