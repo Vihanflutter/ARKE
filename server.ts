@@ -77,6 +77,25 @@ async function startServer() {
     }
   });
 
+  // --- QUICK ACCESS USERS ---
+  app.get('/api/auth/quick-access-users', (req, res) => {
+    try {
+      const allUsers = db.users.findMany();
+      const quickUsers = allUsers.map(u => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        employeeId: u.employeeId,
+        role: u.role,
+        password: u.password,
+        status: u.status
+      }));
+      res.json(quickUsers);
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to fetch quick access users' });
+    }
+  });
+
   // --- DASHBOARD STATS ---
   app.get('/api/dashboard/stats', (req, res) => {
     try {
