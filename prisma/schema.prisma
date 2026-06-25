@@ -1,0 +1,138 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  HALF_DAY
+  LEAVE
+}
+
+enum LeaveType {
+  CASUAL_LEAVE
+  SICK_LEAVE
+  EARNED_LEAVE
+  HALF_DAY
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id             String         @id @default(uuid())
+  employeeId     String         @unique
+  name           String
+  email          String         @unique
+  mobile         String?
+  password       String
+  role           Role           @default(EMPLOYEE)
+  status         EmployeeStatus @default(ACTIVE)
+  joiningDate    DateTime       @default(now())
+  
+  // Relations
+  departmentId   String?
+  department     Department?    @relation(fields: [departmentId], references: [id])
+  designationId  String?
+  designation    Designation?   @relation(fields: [designationId], references: [id])
+  
+  managerId      String?
+  manager        User?          @relation("ManagerToEmployee", fields: [managerId], references: [id])
+  subordinates   User[]         @relation("ManagerToEmployee")
+  
+  attendances    Attendance[]
+  leaveRequests  LeaveRequest[]
+  
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([employeeId])
+  @@index([email])
+}
+
+model Department {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Designation {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Attendance {
+  id           String           @id @default(uuid())
+  userId       String
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date         String           // Format: YYYY-MM-DD
+  punchIn      String?          // Format: HH:MM:SS
+  punchOut     String?          // Format: HH:MM:SS
+  workingHours Float            @default(0.0)
+  status       AttendanceStatus @default(ABSENT)
+  late         Int              @default(0) // Late minutes
+  remarks      String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId])
+  @@index([date])
+}
+
+model LeaveRequest {
+  id             String      @id @default(uuid())
+  userId         String
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leaveType      LeaveType
+  startDate      String      // Format: YYYY-MM-DD
+  endDate        String      // Format: YYYY-MM-DD
+  status         LeaveStatus @default(PENDING)
+  remarks        String?
+  managerRemarks String?
+  approvedById   String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([userId])
+}
+
+model CompanySettings {
+  id                 String   @id @default(uuid())
+  companyName        String   @default("eTimeOffice Enterprise")
+  officeStartTime    String   @default("09:00") // HH:MM
+  officeEndTime      String   @default("18:00") // HH:MM
+  graceTimeMinutes   Int      @default(15)
+  halfDayHours       Float    @default(4.0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
