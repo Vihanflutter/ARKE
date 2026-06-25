@@ -604,6 +604,47 @@ async function startServer() {
     }
   });
 
+  // --- SYSTEM RECOVERY & BACKUP ---
+  app.get('/api/system/status', (req, res) => {
+    try {
+      const allUsers = db.users.findMany();
+      const allAtts = db.attendances.findMany();
+      const allLeaves = db.leaveRequests.findMany();
+      
+      // Default seed is true if there is 1 or fewer users and no attendance or leaves
+      const isDefaultSeed = allUsers.length <= 1 && allAtts.length === 0 && allLeaves.length === 0;
+      
+      res.json({
+        isDefaultSeed,
+        lastUpdated: (db as any).getLastUpdated ? (db as any).getLastUpdated() : undefined,
+        userCount: allUsers.length,
+        attendanceCount: allAtts.length,
+        leaveCount: allLeaves.length
+      });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to retrieve system status' });
+    }
+  });
+
+  app.get('/api/system/export', (req, res) => {
+    try {
+      const data = (db as any).exportAll();
+      res.json(data);
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to export database state' });
+    }
+  });
+
+  app.post('/api/system/restore', (req, res) => {
+    try {
+      const data = req.body;
+      (db as any).importAll(data);
+      res.json({ success: true, message: 'Database state restored successfully.' });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to restore database state' });
+    }
+  });
+
   // ----------------------------------------------------
   // VITE DEV SERVER OR STATIC SERVING MIDDLEWARE
   // ----------------------------------------------------

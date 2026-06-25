@@ -8,6 +8,7 @@ interface DatabaseSchema {
   attendances: Attendance[];
   leaveRequests: LeaveRequest[];
   companySettings: CompanySettings;
+  lastUpdated?: string;
 }
 
 let memoryDb: DatabaseSchema | null = null;
@@ -157,6 +158,7 @@ function getDbFileContent(): DatabaseSchema {
 }
 
 function saveDb(data: DatabaseSchema) {
+  data.lastUpdated = new Date().toISOString();
   memoryDb = data;
   if (isServer) {
     // 1. Write to local file backup
@@ -516,5 +518,14 @@ export const db = {
   reset: () => {
     const seed = getSeedData();
     saveDb(seed);
+  },
+  exportAll: () => {
+    return getDbFileContent();
+  },
+  importAll: (data: DatabaseSchema) => {
+    if (!data || !Array.isArray(data.users)) {
+      throw new Error('Invalid database backup format.');
+    }
+    saveDb(data);
   }
 };
