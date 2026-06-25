@@ -64,7 +64,7 @@ export default function App() {
       // 2. Restore local login session
       if (active) {
         try {
-          const stored = localStorage.getItem('session_user');
+          const stored = sessionStorage.getItem('session_user');
           if (stored) {
             // Re-verify if this user exists on the server (handles the case where DB changed)
             const userObj = JSON.parse(stored);
@@ -78,13 +78,13 @@ export default function App() {
               
               if (hydrated) {
                 setCurrentUser(hydrated);
-                localStorage.setItem('session_user', JSON.stringify(hydrated));
+                sessionStorage.setItem('session_user', JSON.stringify(hydrated));
               } else {
                 setCurrentUser(userObj);
               }
             } else {
               // Session user no longer exists, sign out
-              localStorage.removeItem('session_user');
+              sessionStorage.removeItem('session_user');
               setCurrentUser(null);
             }
           }
@@ -145,7 +145,7 @@ export default function App() {
   const handleLoginSuccess = (user: HydratedUser) => {
     setCurrentUser(user);
     try {
-      localStorage.setItem('session_user', JSON.stringify(user));
+      sessionStorage.setItem('session_user', JSON.stringify(user));
     } catch (e) {
       console.error('Failed storing session', e);
     }
@@ -154,7 +154,7 @@ export default function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     try {
-      localStorage.removeItem('session_user');
+      sessionStorage.removeItem('session_user');
     } catch (e) {
       console.error('Failed clearing session', e);
     }
