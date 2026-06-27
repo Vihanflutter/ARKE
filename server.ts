@@ -346,7 +346,7 @@ async function startServer() {
 
         const settings = db.companySettings.find();
         const halfDayThreshold = settings.halfDayHours;
-        const fullDayThreshold = halfDayThreshold * 2;
+        const fullDayThreshold = 8.0;
 
         let status: AttendanceStatus = 'PRESENT';
         if (hours >= fullDayThreshold) {
@@ -415,7 +415,7 @@ async function startServer() {
       if (pIn && pOut) {
         const settings = db.companySettings.find();
         const halfDayThreshold = settings.halfDayHours;
-        const fullDayThreshold = halfDayThreshold * 2;
+        const fullDayThreshold = 8.0;
         if (workingHours >= fullDayThreshold) {
           finalStatus = 'PRESENT';
         } else if (workingHours >= halfDayThreshold) {

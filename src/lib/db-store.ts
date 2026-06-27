@@ -158,7 +158,7 @@ export function recalculateAllAttendances(dbData: DatabaseSchema): boolean {
 
   const settings = dbData.companySettings || { halfDayHours: 4.0 };
   const halfDayThreshold = settings.halfDayHours;
-  const fullDayThreshold = halfDayThreshold * 2;
+  const fullDayThreshold = 8.0;
 
   let modified = false;
   dbData.attendances.forEach(a => {
@@ -459,7 +459,7 @@ export const db = {
       const dbData = getDbFileContent();
       const settings = dbData.companySettings || { halfDayHours: 4.0 };
       const halfDayThreshold = settings.halfDayHours;
-      const fullDayThreshold = halfDayThreshold * 2;
+      const fullDayThreshold = 8.0;
       return dbData.attendances.map(a => {
         if (a.punchIn && a.punchOut && a.workingHours !== undefined) {
           let expectedStatus: 'PRESENT' | 'HALF_DAY' | 'LEAVE' = 'PRESENT';
@@ -484,7 +484,7 @@ export const db = {
 
       const settings = dbData.companySettings || { halfDayHours: 4.0 };
       const halfDayThreshold = settings.halfDayHours;
-      const fullDayThreshold = halfDayThreshold * 2;
+      const fullDayThreshold = 8.0;
 
       const computedStatus = (workingHours: number, originalStatus?: string, punchIn?: string, punchOut?: string): string => {
         if (punchIn && punchOut) {
@@ -680,10 +680,26 @@ export const db = {
 
   hydrateAttendance: (attendance: Attendance): HydratedAttendance => {
     const dbData = getDbFileContent();
+    const settings = dbData.companySettings || { halfDayHours: 4.0 };
+    const halfDayThreshold = settings.halfDayHours;
+    const fullDayThreshold = 8.0;
+
+    let calculatedStatus = attendance.status;
+    if (attendance.punchIn && attendance.punchOut && attendance.workingHours !== undefined) {
+      if (attendance.workingHours >= fullDayThreshold) {
+        calculatedStatus = 'PRESENT';
+      } else if (attendance.workingHours >= halfDayThreshold) {
+        calculatedStatus = 'HALF_DAY';
+      } else {
+        calculatedStatus = 'LEAVE';
+      }
+    }
+
     const userRaw = dbData.users.find(u => u.id === attendance.userId);
     const user = userRaw ? db.hydrateUser(userRaw) : undefined;
     return {
       ...attendance,
+      status: calculatedStatus as any,
       user
     };
   },

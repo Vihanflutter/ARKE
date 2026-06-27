@@ -327,8 +327,8 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
     setOperationLoading(true);
     const formData = new FormData(e.currentTarget);
     const manualData = {
-      userId: formData.get('userId') as string,
-      date: formData.get('date') as string,
+      userId: (formData.get('userId') as string) || manualAttendanceModal.record?.userId || '',
+      date: (formData.get('date') as string) || manualAttendanceModal.record?.date || '',
       punchIn: formData.get('punchIn') as string || undefined,
       punchOut: formData.get('punchOut') as string || undefined,
       status: formData.get('status') as string,
