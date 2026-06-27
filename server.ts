@@ -378,10 +378,10 @@ async function startServer() {
   const manualAttendanceSchema = z.object({
     userId: z.string(),
     date: z.string(), // YYYY-MM-DD
-    punchIn: z.string().optional(), // HH:MM
-    punchOut: z.string().optional(), // HH:MM
+    punchIn: z.string().nullable().optional(), // HH:MM
+    punchOut: z.string().nullable().optional(), // HH:MM
     status: z.enum(['PRESENT', 'ABSENT', 'HALF_DAY', 'LEAVE']),
-    remarks: z.string().optional(),
+    remarks: z.string().nullable().optional(),
   });
 
   app.post('/api/attendance/manual', (req, res) => {
@@ -391,9 +391,12 @@ async function startServer() {
       let workingHours = 0.0;
       let lateMins = 0;
 
-      if (body.punchIn && body.punchOut) {
-        const [inH, inM] = body.punchIn.split(':').map(Number);
-        const [outH, outM] = body.punchOut.split(':').map(Number);
+      const punchInStr = (body.punchIn && body.punchIn.trim() !== '') ? body.punchIn : undefined;
+      const punchOutStr = (body.punchOut && body.punchOut.trim() !== '') ? body.punchOut : undefined;
+
+      if (punchInStr && punchOutStr) {
+        const [inH, inM] = punchInStr.split(':').map(Number);
+        const [outH, outM] = punchOutStr.split(':').map(Number);
         workingHours = parseFloat(((outH + outM/60) - (inH + inM/60)).toFixed(2));
 
         const settings = db.companySettings.find();
@@ -405,8 +408,8 @@ async function startServer() {
       }
 
       // Format input punch times to include seconds (e.g. HH:MM:00)
-      const pIn = body.punchIn ? (body.punchIn.split(':').length === 2 ? `${body.punchIn}:00` : body.punchIn) : undefined;
-      const pOut = body.punchOut ? (body.punchOut.split(':').length === 2 ? `${body.punchOut}:00` : body.punchOut) : undefined;
+      const pIn = punchInStr ? (punchInStr.split(':').length === 2 ? `${punchInStr}:00` : punchInStr) : undefined;
+      const pOut = punchOutStr ? (punchOutStr.split(':').length === 2 ? `${punchOutStr}:00` : punchOutStr) : undefined;
 
       let finalStatus = body.status;
       if (pIn && pOut) {

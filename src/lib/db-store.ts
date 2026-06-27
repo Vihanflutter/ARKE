@@ -456,10 +456,27 @@ export const db = {
   // --- ATTENDANCE ---
   attendances: {
     findMany: (): Attendance[] => {
-      return getDbFileContent().attendances;
+      const dbData = getDbFileContent();
+      const settings = dbData.companySettings || { halfDayHours: 4.0 };
+      const halfDayThreshold = settings.halfDayHours;
+      const fullDayThreshold = halfDayThreshold * 2;
+      return dbData.attendances.map(a => {
+        if (a.punchIn && a.punchOut && a.workingHours !== undefined) {
+          let expectedStatus: 'PRESENT' | 'HALF_DAY' | 'LEAVE' = 'PRESENT';
+          if (a.workingHours >= fullDayThreshold) {
+            expectedStatus = 'PRESENT';
+          } else if (a.workingHours >= halfDayThreshold) {
+            expectedStatus = 'HALF_DAY';
+          } else {
+            expectedStatus = 'LEAVE';
+          }
+          return { ...a, status: expectedStatus };
+        }
+        return a;
+      });
     },
     findUnique: (predicate: (a: Attendance) => boolean): Attendance | undefined => {
-      return getDbFileContent().attendances.find(predicate);
+      return db.attendances.findMany().find(predicate);
     },
     upsert: (userId: string, date: string, data: Partial<Attendance>): Attendance => {
       const dbData = getDbFileContent();
