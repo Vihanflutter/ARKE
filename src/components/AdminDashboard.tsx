@@ -24,6 +24,7 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
   const [employees, setEmployees] = useState<HydratedUser[]>([]);
   const [attendances, setAttendances] = useState<HydratedAttendance[]>([]);
   const [leaves, setLeaves] = useState<HydratedLeaveRequest[]>([]);
+  const [leaveStatusFilter, setLeaveStatusFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('ALL');
   const [departments, setDepartments] = useState<Department[]>([]);
   const [designations, setDesignations] = useState<Designation[]>([]);
   const [settings, setSettings] = useState<CompanySettings | null>(null);
@@ -1169,13 +1170,43 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                       <p className="text-xs text-slate-500 mt-1">Approve, reject, or comment on employee leave submissions</p>
                     </div>
 
+                    {/* Status filter tabs */}
+                    <div className="flex border-b border-slate-200 gap-1 overflow-x-auto pb-1">
+                      {(['ALL', 'PENDING', 'APPROVED', 'REJECTED'] as const).map((status) => {
+                        const count = status === 'ALL' 
+                          ? leaves.length 
+                          : leaves.filter(l => l.status === status).length;
+                        return (
+                          <button
+                            key={status}
+                            type="button"
+                            onClick={() => setLeaveStatusFilter(status)}
+                            className={`py-2 px-3.5 border-b-2 font-medium text-xs transition-all relative flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                              leaveStatusFilter === status
+                                ? 'border-slate-900 text-slate-900 font-semibold'
+                                : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
+                            }`}
+                          >
+                            <span className="capitalize">{status.toLowerCase()}</span>
+                            {count > 0 && (
+                              <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded-full text-[10px] font-bold border border-slate-200">
+                                {count}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
                     <div className="grid grid-cols-1 gap-4">
-                      {leaves.length === 0 ? (
+                      {leaves.filter(l => leaveStatusFilter === 'ALL' || l.status === leaveStatusFilter).length === 0 ? (
                         <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 text-xs font-semibold">
-                          No leave applications filed in systems.
+                          No {leaveStatusFilter === 'ALL' ? '' : leaveStatusFilter.toLowerCase() + ' '}leave applications found.
                         </div>
                       ) : (
-                        leaves.map((leave) => (
+                        leaves
+                          .filter(l => leaveStatusFilter === 'ALL' || l.status === leaveStatusFilter)
+                          .map((leave) => (
                           <div key={leave.id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col md:flex-row justify-between gap-4 hover:shadow-md transition-colors">
                             <div className="space-y-2">
                               <div className="flex items-center gap-2">
