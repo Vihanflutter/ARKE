@@ -344,10 +344,14 @@ async function startServer() {
         const outSecs = outH * 3600 + outM * 60 + outS;
         const hours = parseFloat(((outSecs - inSecs) / 3600).toFixed(2));
 
+        const settings = db.companySettings.find();
+        const halfDayThreshold = settings.halfDayHours;
+        const fullDayThreshold = halfDayThreshold * 2;
+
         let status: AttendanceStatus = 'PRESENT';
-        if (hours >= 8.0) {
+        if (hours >= fullDayThreshold) {
           status = 'PRESENT';
-        } else if (hours >= 4.0) {
+        } else if (hours >= halfDayThreshold) {
           status = 'HALF_DAY';
         } else {
           status = 'LEAVE';
@@ -406,9 +410,12 @@ async function startServer() {
 
       let finalStatus = body.status;
       if (pIn && pOut) {
-        if (workingHours >= 8.0) {
+        const settings = db.companySettings.find();
+        const halfDayThreshold = settings.halfDayHours;
+        const fullDayThreshold = halfDayThreshold * 2;
+        if (workingHours >= fullDayThreshold) {
           finalStatus = 'PRESENT';
-        } else if (workingHours >= 4.0) {
+        } else if (workingHours >= halfDayThreshold) {
           finalStatus = 'HALF_DAY';
         } else {
           finalStatus = 'LEAVE';

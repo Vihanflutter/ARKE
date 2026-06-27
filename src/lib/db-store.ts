@@ -149,31 +149,42 @@ function selfHealDatabase(dbData: DatabaseSchema) {
   }
 
   // Auto-correct any inconsistent attendance statuses based on actual working hours
-  if (dbData && Array.isArray(dbData.attendances)) {
-    let attsModified = false;
-    dbData.attendances.forEach(a => {
-      if (a.punchIn && a.punchOut && a.workingHours !== undefined) {
-        let expectedStatus: 'PRESENT' | 'HALF_DAY' | 'LEAVE' = 'PRESENT';
-        if (a.workingHours >= 8.0) {
-          expectedStatus = 'PRESENT';
-        } else if (a.workingHours >= 4.0) {
-          expectedStatus = 'HALF_DAY';
-        } else {
-          expectedStatus = 'LEAVE';
-        }
+  recalculateAllAttendances(dbData);
+}
 
-        if (a.status !== expectedStatus) {
-          console.log(`Auto-correcting status for ${a.userId} on ${a.date}: current status is ${a.status}, changing to expected ${expectedStatus} based on ${a.workingHours} working hours.`);
-          a.status = expectedStatus;
-          attsModified = true;
-        }
+// Recalculates all attendance statuses based on the company's working hour thresholds
+export function recalculateAllAttendances(dbData: DatabaseSchema): boolean {
+  if (!dbData || !Array.isArray(dbData.attendances)) return false;
+
+  const settings = dbData.companySettings || { halfDayHours: 4.0 };
+  const halfDayThreshold = settings.halfDayHours;
+  const fullDayThreshold = halfDayThreshold * 2;
+
+  let modified = false;
+  dbData.attendances.forEach(a => {
+    if (a.punchIn && a.punchOut && a.workingHours !== undefined) {
+      let expectedStatus: 'PRESENT' | 'HALF_DAY' | 'LEAVE' = 'PRESENT';
+      if (a.workingHours >= fullDayThreshold) {
+        expectedStatus = 'PRESENT';
+      } else if (a.workingHours >= halfDayThreshold) {
+        expectedStatus = 'HALF_DAY';
+      } else {
+        expectedStatus = 'LEAVE';
       }
-    });
 
-    if (attsModified) {
-      saveDb(dbData);
+      if (a.status !== expectedStatus) {
+        console.log(`Auto-sync recalculation: updating ${a.userId} on ${a.date} from ${a.status} to ${expectedStatus} based on ${a.workingHours} working hours (half-day threshold: ${halfDayThreshold} hrs).`);
+        a.status = expectedStatus;
+        a.updatedAt = new Date().toISOString();
+        modified = true;
+      }
     }
+  });
+
+  if (modified) {
+    saveDb(dbData);
   }
+  return modified;
 }
 
 // Asynchronously load DB from Postgres or fallback file at server startup
@@ -454,10 +465,14 @@ export const db = {
       const dbData = getDbFileContent();
       const existingIdx = dbData.attendances.findIndex(a => a.userId === userId && a.date === date);
 
+      const settings = dbData.companySettings || { halfDayHours: 4.0 };
+      const halfDayThreshold = settings.halfDayHours;
+      const fullDayThreshold = halfDayThreshold * 2;
+
       const computedStatus = (workingHours: number, originalStatus?: string, punchIn?: string, punchOut?: string): string => {
         if (punchIn && punchOut) {
-          if (workingHours >= 8.0) return 'PRESENT';
-          if (workingHours >= 4.0) return 'HALF_DAY';
+          if (workingHours >= fullDayThreshold) return 'PRESENT';
+          if (workingHours >= halfDayThreshold) return 'HALF_DAY';
           return 'LEAVE';
         }
         return originalStatus || 'ABSENT';
@@ -618,6 +633,7 @@ export const db = {
         updatedAt: new Date().toISOString()
       };
       dbData.companySettings = updated;
+      recalculateAllAttendances(dbData);
       saveDb(dbData);
       return updated;
     }
