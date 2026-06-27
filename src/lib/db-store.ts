@@ -147,6 +147,33 @@ function selfHealDatabase(dbData: DatabaseSchema) {
   if (modified) {
     saveDb(dbData);
   }
+
+  // Auto-correct any inconsistent attendance statuses based on actual working hours
+  if (dbData && Array.isArray(dbData.attendances)) {
+    let attsModified = false;
+    dbData.attendances.forEach(a => {
+      if (a.punchIn && a.punchOut && a.workingHours !== undefined) {
+        let expectedStatus: 'PRESENT' | 'HALF_DAY' | 'LEAVE' = 'PRESENT';
+        if (a.workingHours >= 8.0) {
+          expectedStatus = 'PRESENT';
+        } else if (a.workingHours >= 4.0) {
+          expectedStatus = 'HALF_DAY';
+        } else {
+          expectedStatus = 'LEAVE';
+        }
+
+        if (a.status !== expectedStatus) {
+          console.log(`Auto-correcting status for ${a.userId} on ${a.date}: current status is ${a.status}, changing to expected ${expectedStatus} based on ${a.workingHours} working hours.`);
+          a.status = expectedStatus;
+          attsModified = true;
+        }
+      }
+    });
+
+    if (attsModified) {
+      saveDb(dbData);
+    }
+  }
 }
 
 // Asynchronously load DB from Postgres or fallback file at server startup
@@ -427,11 +454,13 @@ export const db = {
       const dbData = getDbFileContent();
       const existingIdx = dbData.attendances.findIndex(a => a.userId === userId && a.date === date);
 
-      const computedStatus = (workingHours: number, originalStatus?: string): string => {
-        if (originalStatus === 'LEAVE' || originalStatus === 'ABSENT') return originalStatus;
-        if (workingHours >= 8.0) return 'PRESENT';
-        if (workingHours >= 4.0) return 'HALF_DAY';
-        return 'ABSENT';
+      const computedStatus = (workingHours: number, originalStatus?: string, punchIn?: string, punchOut?: string): string => {
+        if (punchIn && punchOut) {
+          if (workingHours >= 8.0) return 'PRESENT';
+          if (workingHours >= 4.0) return 'HALF_DAY';
+          return 'LEAVE';
+        }
+        return originalStatus || 'ABSENT';
       };
 
       if (existingIdx !== -1) {
@@ -440,7 +469,12 @@ export const db = {
           ...existing,
           ...data,
           workingHours: data.workingHours !== undefined ? data.workingHours : existing.workingHours,
-          status: (data.status || computedStatus(data.workingHours !== undefined ? data.workingHours : existing.workingHours, data.status || existing.status)) as any,
+          status: computedStatus(
+            data.workingHours !== undefined ? data.workingHours : existing.workingHours,
+            data.status || existing.status,
+            data.punchIn || existing.punchIn,
+            data.punchOut || existing.punchOut
+          ) as any,
           updatedAt: new Date().toISOString()
         };
         dbData.attendances[existingIdx] = updated;
@@ -454,7 +488,12 @@ export const db = {
           punchIn: data.punchIn || undefined,
           punchOut: data.punchOut || undefined,
           workingHours: data.workingHours || 0.0,
-          status: (data.status || computedStatus(data.workingHours || 0.0, data.status)) as any,
+          status: computedStatus(
+            data.workingHours || 0.0,
+            data.status,
+            data.punchIn,
+            data.punchOut
+          ) as any,
           late: data.late || 0,
           remarks: data.remarks || '',
           createdAt: new Date().toISOString(),

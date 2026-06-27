@@ -404,12 +404,23 @@ async function startServer() {
       const pIn = body.punchIn ? (body.punchIn.split(':').length === 2 ? `${body.punchIn}:00` : body.punchIn) : undefined;
       const pOut = body.punchOut ? (body.punchOut.split(':').length === 2 ? `${body.punchOut}:00` : body.punchOut) : undefined;
 
+      let finalStatus = body.status;
+      if (pIn && pOut) {
+        if (workingHours >= 8.0) {
+          finalStatus = 'PRESENT';
+        } else if (workingHours >= 4.0) {
+          finalStatus = 'HALF_DAY';
+        } else {
+          finalStatus = 'LEAVE';
+        }
+      }
+
       const created = db.attendances.upsert(body.userId, body.date, {
         punchIn: pIn,
         punchOut: pOut,
         workingHours,
         late: lateMins,
-        status: body.status,
+        status: finalStatus,
         remarks: body.remarks || 'Manual Entry'
       });
 
