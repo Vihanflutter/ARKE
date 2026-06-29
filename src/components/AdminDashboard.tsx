@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { apiRequest } from '../lib/api-client';
-import { exportToExcel, exportToPDF } from '../lib/reports-export';
+import { 
+  exportToExcel, exportToPDF,
+  exportMonthlyRegisterToExcel, exportMonthlyRegisterToPDF,
+  exportCompanyWideToExcel, exportCompanyWideToPDF
+} from '../lib/reports-export';
 import { 
   HydratedUser, HydratedAttendance, HydratedLeaveRequest, Department, Designation, CompanySettings,
   Role, EmployeeStatus, AttendanceStatus, LeaveType, LeaveStatus
@@ -95,11 +99,13 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
   const [attDeptFilter, setAttDeptFilter] = useState('');
   
   // Reports Filter
-  const [reportType, setReportType] = useState<'daily' | 'monthly' | 'department' | 'employee'>('daily');
+  const [reportType, setReportType] = useState<'daily' | 'monthly_employee' | 'monthly_company' | 'department' | 'employee'>('daily');
   const [reportDate, setReportDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [reportMonth, setReportMonth] = useState('2026-06');
   const [reportDeptId, setReportDeptId] = useState('');
   const [reportEmpId, setReportEmpId] = useState('');
+  const [reportFromDate, setReportFromDate] = useState('2026-06-01');
+  const [reportToDate, setReportToDate] = useState('2026-06-30');
 
   // Fetch all initial data
   const loadAllData = async () => {
@@ -537,18 +543,58 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
           const dName = departments.find(d => d.id === reportDeptId)?.name || '';
           subtitle += ` | Dept: ${dName}`;
         }
-      } else if (reportType === 'monthly') {
+      } else if (reportType === 'monthly_employee') {
+        if (!reportEmpId) {
+          showMsg('error', 'Please pick an employee.');
+          setOperationLoading(false);
+          return;
+        }
+        if (!reportMonth) {
+          showMsg('error', 'Please pick a target month.');
+          setOperationLoading(false);
+          return;
+        }
+        url += `userId=${reportEmpId}&month=${reportMonth}`;
+        const emp = employees.find(e => e.id === reportEmpId);
+        if (!emp) {
+          showMsg('error', 'Employee not found.');
+          setOperationLoading(false);
+          return;
+        }
+        const companyName = settings?.companyName || 'Soching Education';
+        const reportLogs = await apiRequest<HydratedAttendance[]>(url);
+        if (format === 'excel') {
+          await exportMonthlyRegisterToExcel(companyName, reportMonth, emp, reportLogs);
+        } else {
+          exportMonthlyRegisterToPDF(companyName, reportMonth, emp, reportLogs);
+        }
+        setOperationLoading(false);
+        return;
+      } else if (reportType === 'monthly_company') {
+        if (!reportMonth) {
+          showMsg('error', 'Please pick a target month.');
+          setOperationLoading(false);
+          return;
+        }
         url += `month=${reportMonth}`;
-        title = `Monthly Attendance Matrix`;
-        subtitle = `Roster Month: ${reportMonth}`;
         if (reportDeptId) {
           url += `&departmentId=${reportDeptId}`;
-          const dName = departments.find(d => d.id === reportDeptId)?.name || '';
-          subtitle += ` | Dept: ${dName}`;
         }
+        const companyName = settings?.companyName || 'Soching Education';
+        const deptName = reportDeptId ? departments.find(d => d.id === reportDeptId)?.name : undefined;
+        const filteredEmployees = reportDeptId ? employees.filter(e => e.departmentId === reportDeptId) : employees;
+        const reportLogs = await apiRequest<HydratedAttendance[]>(url);
+        if (format === 'excel') {
+          await exportCompanyWideToExcel(companyName, reportMonth, filteredEmployees, reportLogs, deptName);
+        } else {
+          exportCompanyWideToPDF(companyName, reportMonth, filteredEmployees, reportLogs, deptName);
+        }
+        setOperationLoading(false);
+        return;
       } else if (reportType === 'department') {
         if (!reportDeptId) {
           showMsg('error', 'Please pick a department.');
+          setOperationLoading(false);
           return;
         }
         url += `departmentId=${reportDeptId}`;
@@ -558,12 +604,13 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
       } else if (reportType === 'employee') {
         if (!reportEmpId) {
           showMsg('error', 'Please pick an employee.');
+          setOperationLoading(false);
           return;
         }
-        url += `userId=${reportEmpId}`;
+        url += `userId=${reportEmpId}&fromDate=${reportFromDate}&toDate=${reportToDate}`;
         targetUser = employees.find(e => e.id === reportEmpId);
         title = `Employee Dossier Sheet`;
-        subtitle = `Employee ID: ${targetUser?.employeeId || ''}`;
+        subtitle = `Period: ${reportFromDate} to ${reportToDate}`;
       }
 
       const reportLogs = await apiRequest<HydratedAttendance[]>(url);
@@ -1307,12 +1354,21 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                               </button>
                               <button
                                 type="button"
-                                onClick={() => setReportType('monthly')}
+                                onClick={() => setReportType('monthly_employee')}
                                 className={`py-2.5 px-4 rounded-lg border text-xs font-semibold transition text-left cursor-pointer ${
-                                  reportType === 'monthly' ? 'border-slate-900 bg-slate-50 text-slate-950' : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                                  reportType === 'monthly_employee' ? 'border-slate-900 bg-slate-50 text-slate-950' : 'border-slate-200 hover:bg-slate-50 text-slate-700'
                                 }`}
                               >
-                                Monthly Matrix Sheet
+                                Monthly Attendance Register
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setReportType('monthly_company')}
+                                className={`py-2.5 px-4 rounded-lg border text-xs font-semibold transition text-left cursor-pointer ${
+                                  reportType === 'monthly_company' ? 'border-slate-900 bg-slate-50 text-slate-950' : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                                }`}
+                              >
+                                Company-Wide Monthly Matrix
                               </button>
                               <button
                                 type="button"
@@ -1350,7 +1406,7 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                               </div>
                             )}
 
-                            {reportType === 'monthly' && (
+                            {(reportType === 'monthly_employee' || reportType === 'monthly_company') && (
                               <div>
                                 <label className="block text-xs text-slate-500 mb-1">Target Month</label>
                                 <input
@@ -1362,23 +1418,7 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                               </div>
                             )}
 
-                            {(reportType === 'daily' || reportType === 'monthly' || reportType === 'department') && (
-                              <div>
-                                <label className="block text-xs text-slate-500 mb-1">Department (Optional)</label>
-                                <select
-                                  value={reportDeptId}
-                                  onChange={(e) => setReportDeptId(e.target.value)}
-                                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none bg-white focus:border-slate-900"
-                                >
-                                  <option value="">All Departments</option>
-                                  {departments.map(d => (
-                                    <option key={d.id} value={d.id}>{d.name}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            )}
-
-                            {reportType === 'employee' && (
+                            {reportType === 'monthly_employee' && (
                               <div>
                                 <label className="block text-xs text-slate-500 mb-1">Select Employee Profile</label>
                                 <select
@@ -1391,6 +1431,63 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                                     <option key={e.id} value={e.id}>{e.name} ({e.employeeId})</option>
                                   ))}
                                 </select>
+                              </div>
+                            )}
+
+                            {(reportType === 'daily' || reportType === 'monthly_company' || reportType === 'department') && (
+                              <div>
+                                <label className="block text-xs text-slate-500 mb-1">
+                                  {reportType === 'department' ? 'Department' : 'Department (Optional)'}
+                                </label>
+                                <select
+                                  value={reportDeptId}
+                                  onChange={(e) => setReportDeptId(e.target.value)}
+                                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none bg-white focus:border-slate-900"
+                                >
+                                  {reportType !== 'department' && <option value="">All Departments</option>}
+                                  {reportType === 'department' && <option value="">-- Choose Department --</option>}
+                                  {departments.map(d => (
+                                    <option key={d.id} value={d.id}>{d.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+
+                            {reportType === 'employee' && (
+                              <div className="space-y-3">
+                                <div>
+                                  <label className="block text-xs text-slate-500 mb-1">Select Employee Profile</label>
+                                  <select
+                                    value={reportEmpId}
+                                    onChange={(e) => setReportEmpId(e.target.value)}
+                                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none bg-white focus:border-slate-900"
+                                  >
+                                    <option value="">-- Choose Profile --</option>
+                                    {employees.map(e => (
+                                      <option key={e.id} value={e.id}>{e.name} ({e.employeeId})</option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                    <label className="block text-xs text-slate-500 mb-1">From Date</label>
+                                    <input
+                                      type="date"
+                                      value={reportFromDate}
+                                      onChange={(e) => setReportFromDate(e.target.value)}
+                                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none bg-white focus:border-slate-900"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-slate-500 mb-1">To Date</label>
+                                    <input
+                                      type="date"
+                                      value={reportToDate}
+                                      onChange={(e) => setReportToDate(e.target.value)}
+                                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none bg-white focus:border-slate-900"
+                                    />
+                                  </div>
+                                </div>
                               </div>
                             )}
                           </div>

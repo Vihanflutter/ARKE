@@ -258,7 +258,7 @@ async function startServer() {
   // --- ATTENDANCE ---
   app.get('/api/attendance', (req, res) => {
     try {
-      const { userId, date, month, departmentId } = req.query;
+      const { userId, date, month, departmentId, fromDate, toDate } = req.query;
       let logs = db.attendances.findMany();
 
       if (userId) {
@@ -270,6 +270,12 @@ async function startServer() {
       if (month) {
         // month is YYYY-MM
         logs = logs.filter(a => a.date.startsWith(month as string));
+      }
+      if (fromDate) {
+        logs = logs.filter(a => a.date >= (fromDate as string));
+      }
+      if (toDate) {
+        logs = logs.filter(a => a.date <= (toDate as string));
       }
 
       let hydrated = logs.map(a => db.hydrateAttendance(a));

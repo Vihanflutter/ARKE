@@ -417,3 +417,728 @@ export function exportToPDF(
   // Save the PDF
   doc.save(`${title.replace(/\s+/g, '_')}_Report.pdf`);
 }
+
+// Helper Utilities
+function formatMonth(monthStr: string): string {
+  if (!monthStr) return '';
+  const [year, month] = monthStr.split('-');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const mIdx = parseInt(month, 10) - 1;
+  return `${months[mIdx]}-${year}`;
+}
+
+function formatDecimalToHHMM(decimalHours: number): string {
+  if (!decimalHours || decimalHours <= 0) return '00:00';
+  const hrs = Math.floor(decimalHours);
+  const mins = Math.round((decimalHours - hrs) * 60);
+  return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}
+
+function parseTimeToMins(timeStr?: string): number | null {
+  if (!timeStr || !timeStr.includes(':')) return null;
+  const [h, m] = timeStr.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function formatMinsToHHMM(totalMins: number): string {
+  if (totalMins <= 0) return '00:00';
+  const h = Math.floor(totalMins / 60);
+  const m = Math.round(totalMins % 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+// ----------------------------------------------------
+// REDESIGNED SINGLE EMPLOYEE MONTHLY ATTENDANCE REGISTER (REQ 2)
+// ----------------------------------------------------
+export async function exportMonthlyRegisterToExcel(
+  companyName: string,
+  monthStr: string,
+  employee: HydratedUser,
+  logs: HydratedAttendance[]
+) {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('Monthly Register');
+  worksheet.views = [{ showGridLines: true }];
+
+  // 1. Title Block
+  worksheet.mergeCells('A1:T1');
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = companyName || 'Soching Education';
+  titleCell.font = { name: 'Arial', size: 14, bold: true };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(1).height = 30;
+
+  // 2. Info Grid
+  worksheet.getRow(3).values = [
+    'Dept. Name', employee.department?.name || 'Default',
+    '', '', '', '', '', '', 'Report Month:-', formatMonth(monthStr),
+    '', '', '', '', '', '', '', '', '', ''
+  ];
+  worksheet.getRow(3).font = { name: 'Arial', size: 10, bold: true };
+
+  worksheet.getRow(4).values = [
+    'Empcode', employee.employeeId || '',
+    '', '', 'Name', employee.name || '',
+    '', '', '', '', '', '', '', '', '', '', '', '', '', ''
+  ];
+  worksheet.getRow(4).font = { name: 'Arial', size: 10, bold: true };
+
+  // Set borders for meta block
+  for (let r = 3; r <= 4; r++) {
+    for (let c = 1; c <= 20; c++) {
+      worksheet.getCell(r, c).border = {
+        top: { style: 'thin', color: { argb: 'CCCCCC' } },
+        bottom: { style: 'thin', color: { argb: 'CCCCCC' } }
+      };
+    }
+  }
+
+  // 3. Table Header
+  const headers = [
+    'Date', 'Shift', 'IN', 'Out1', 'In2', 'Out2', 'In3', 'Out3', 'In4', 'Out4',
+    'In5', 'Out5', 'In6', 'Out6', 'In7', 'Out7', 'In8', 'Out', 'Work+OT', 'OT', 'Break'
+  ];
+  const headerRowIdx = 6;
+  const headerRow = worksheet.getRow(headerRowIdx);
+  headerRow.values = headers;
+  headerRow.height = 24;
+  headers.forEach((_, idx) => {
+    const cell = headerRow.getCell(idx + 1);
+    cell.font = { name: 'Arial', size: 9, bold: true };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border = {
+      top: { style: 'medium', color: { argb: '333333' } },
+      bottom: { style: 'medium', color: { argb: '333333' } },
+      left: { style: 'thin', color: { argb: 'CCCCCC' } },
+      right: { style: 'thin', color: { argb: 'CCCCCC' } }
+    };
+  });
+
+  // Calculate Dates
+  const [yearNum, monthNum] = monthStr.split('-').map(Number);
+  const daysCount = new Date(yearNum, monthNum, 0).getDate();
+
+  let totalWorkMins = 0;
+  let totalOTMins = 0;
+  let totalBreakMins = 0;
+
+  let presentCount = 0;
+  let halfDayCount = 0;
+  let leaveCount = 0;
+  let absentCount = 0;
+  let holidayCount = 0;
+
+  let currentExcelRow = 7;
+
+  for (let d = 1; d <= daysCount; d++) {
+    const dayStr = String(d).padStart(2, '0');
+    const dateStr = `${yearNum}-${String(monthNum).padStart(2, '0')}-${dayStr}`;
+    const dObj = new Date(dateStr);
+    const isSunday = dObj.getDay() === 0;
+
+    const displayDate = `${dayStr}/${String(monthNum).padStart(2, '0')}/${yearNum}`;
+    const att = logs.find(l => l.date === dateStr);
+
+    let shift = 'G';
+    let inStr = '';
+    let out1Str = '';
+    let in2Str = '';
+    let outStr = '';
+    let workHrs = 0.0;
+    let otHrs = 0.0;
+    let breakMins = 0;
+
+    if (att) {
+      const isAbsentOrLeave = att.status === 'ABSENT' || att.status === 'LEAVE';
+      shift = isAbsentOrLeave ? 'X' : 'G';
+
+      if (att.status === 'PRESENT') presentCount++;
+      else if (att.status === 'HALF_DAY') halfDayCount++;
+      else if (att.status === 'LEAVE') leaveCount++;
+      else if (att.status === 'ABSENT') absentCount++;
+
+      if (!isAbsentOrLeave) {
+        inStr = att.punchIn ? att.punchIn.substring(0, 5) : '';
+        outStr = att.punchOut ? att.punchOut.substring(0, 5) : '';
+        workHrs = att.workingHours || 0.0;
+        totalWorkMins += workHrs * 60;
+
+        if (workHrs > 9.0) {
+          otHrs = workHrs - 9.0;
+          totalOTMins += otHrs * 60;
+        }
+
+        // Calculate Break
+        const inMins = parseTimeToMins(att.punchIn);
+        const outMins = parseTimeToMins(att.punchOut);
+        if (inMins !== null && outMins !== null) {
+          const elapsed = outMins - inMins;
+          const actualWork = workHrs * 60;
+          if (elapsed > actualWork) {
+            breakMins = elapsed - actualWork;
+            totalBreakMins += breakMins;
+
+            const lunchStartMins = inMins + 120; // 2 hours later
+            out1Str = formatMinsToHHMM(lunchStartMins);
+            in2Str = formatMinsToHHMM(lunchStartMins + breakMins);
+          }
+        }
+      } else {
+        inStr = '--:--';
+        outStr = '--:--';
+      }
+    } else {
+      // No log
+      if (isSunday) {
+        shift = 'X';
+        inStr = '--:--';
+        outStr = '--:--';
+        holidayCount++;
+      } else {
+        shift = 'G';
+        absentCount++;
+      }
+    }
+
+    const rowValues = [
+      displayDate, shift, inStr, out1Str, in2Str, '', '', '', '', '',
+      '', '', '', '', '', '', '', outStr, formatDecimalToHHMM(workHrs),
+      formatDecimalToHHMM(otHrs), formatMinsToHHMM(breakMins)
+    ];
+
+    const row = worksheet.getRow(currentExcelRow);
+    row.values = rowValues;
+    row.height = 20;
+
+    // Borders & Font for row
+    for (let c = 1; c <= 21; c++) {
+      const cell = row.getCell(c);
+      cell.font = { name: 'Arial', size: 8 };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'E5E7EB' } },
+        bottom: { style: 'thin', color: { argb: 'E5E7EB' } },
+        left: { style: 'thin', color: { argb: 'E5E7EB' } },
+        right: { style: 'thin', color: { argb: 'E5E7EB' } }
+      };
+    }
+
+    currentExcelRow++;
+  }
+
+  // 4. Totals row (Footer 1)
+  const totalsRow = worksheet.getRow(currentExcelRow);
+  totalsRow.height = 24;
+  totalsRow.getCell(2).value = 'Total Work+OT Hrs:-';
+  totalsRow.getCell(2).font = { name: 'Arial', size: 9, bold: true };
+  totalsRow.getCell(2).alignment = { horizontal: 'right' };
+
+  totalsRow.getCell(4).value = formatMinsToHHMM(totalWorkMins);
+  totalsRow.getCell(4).font = { name: 'Arial', size: 9, bold: true };
+
+  totalsRow.getCell(8).value = 'Total OT Hrs:-';
+  totalsRow.getCell(8).font = { name: 'Arial', size: 9, bold: true };
+  totalsRow.getCell(8).alignment = { horizontal: 'right' };
+
+  totalsRow.getCell(10).value = formatMinsToHHMM(totalOTMins);
+  totalsRow.getCell(10).font = { name: 'Arial', size: 9, bold: true };
+
+  totalsRow.getCell(14).value = 'Total Break Hrs:-';
+  totalsRow.getCell(14).font = { name: 'Arial', size: 9, bold: true };
+  totalsRow.getCell(14).alignment = { horizontal: 'right' };
+
+  totalsRow.getCell(16).value = formatMinsToHHMM(totalBreakMins);
+  totalsRow.getCell(16).font = { name: 'Arial', size: 9, bold: true };
+
+  for (let c = 1; c <= 21; c++) {
+    totalsRow.getCell(c).border = {
+      top: { style: 'medium', color: { argb: '333333' } },
+      bottom: { style: 'medium', color: { argb: '333333' } }
+    };
+  }
+
+  currentExcelRow += 2;
+
+  // 5. Grid Summary Block (Footer 2)
+  const summaryGridRow1 = worksheet.getRow(currentExcelRow);
+  summaryGridRow1.getCell(1).value = 'Total Pr.';
+  summaryGridRow1.getCell(1).font = { name: 'Arial', size: 9, bold: true, color: { argb: '059669' } };
+  summaryGridRow1.getCell(2).value = presentCount + (halfDayCount * 0.5);
+  summaryGridRow1.getCell(2).font = { name: 'Arial', size: 9, bold: true, color: { argb: '059669' } };
+  summaryGridRow1.getCell(2).alignment = { horizontal: 'center' };
+
+  const summaryGridRow2 = worksheet.getRow(currentExcelRow + 1);
+  summaryGridRow2.getCell(1).value = 'Total Leave';
+  summaryGridRow2.getCell(1).font = { name: 'Arial', size: 9, bold: true, color: { argb: '2563EB' } };
+  summaryGridRow2.getCell(2).value = leaveCount;
+  summaryGridRow2.getCell(2).font = { name: 'Arial', size: 9, bold: true, color: { argb: '2563EB' } };
+  summaryGridRow2.getCell(2).alignment = { horizontal: 'center' };
+
+  const summaryGridRow3 = worksheet.getRow(currentExcelRow + 2);
+  summaryGridRow3.getCell(1).value = 'Total Half Days';
+  summaryGridRow3.getCell(1).font = { name: 'Arial', size: 9, bold: true, color: { argb: 'D97706' } };
+  summaryGridRow3.getCell(2).value = halfDayCount;
+  summaryGridRow3.getCell(2).font = { name: 'Arial', size: 9, bold: true, color: { argb: 'D97706' } };
+  summaryGridRow3.getCell(2).alignment = { horizontal: 'center' };
+
+  const summaryGridRow4 = worksheet.getRow(currentExcelRow + 3);
+  summaryGridRow4.getCell(1).value = 'Total Absent';
+  summaryGridRow4.getCell(1).font = { name: 'Arial', size: 9, bold: true, color: { argb: 'DC2626' } };
+  summaryGridRow4.getCell(2).value = absentCount;
+  summaryGridRow4.getCell(2).font = { name: 'Arial', size: 9, bold: true, color: { argb: 'DC2626' } };
+  summaryGridRow4.getCell(2).alignment = { horizontal: 'center' };
+
+  // Style the little summary box with borders
+  for (let r = currentExcelRow; r <= currentExcelRow + 3; r++) {
+    for (let c = 1; c <= 2; r ? c++ : c) {
+      worksheet.getCell(r, c).border = {
+        top: { style: 'thin', color: { argb: 'CCCCCC' } },
+        bottom: { style: 'thin', color: { argb: 'CCCCCC' } },
+        left: { style: 'thin', color: { argb: 'CCCCCC' } },
+        right: { style: 'thin', color: { argb: 'CCCCCC' } }
+      };
+    }
+  }
+
+  // Set Widths
+  worksheet.columns = headers.map((h, i) => ({
+    header: h,
+    key: `col_${i}`,
+    width: i === 0 ? 12 : 7
+  }));
+
+  // Trigger download
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Monthly_Attendance_Register_${employee.employeeId || 'Employee'}_${monthStr}.xlsx`;
+  a.click();
+  window.URL.revokeObjectURL(url);
+}
+
+export function exportMonthlyRegisterToPDF(
+  companyName: string,
+  monthStr: string,
+  employee: HydratedUser,
+  logs: HydratedAttendance[]
+) {
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+  // Draw deep charcoal top bar
+  doc.setFillColor(31, 41, 55);
+  doc.rect(0, 0, 297, 18, 'F');
+
+  // Title
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.text(companyName || 'Soching Education', 14, 11);
+
+  // Info Details
+  doc.setTextColor(55, 65, 81);
+  doc.setFontSize(9);
+  doc.text(`Dept. Name: ${employee.department?.name || 'Default'}`, 14, 25);
+  doc.text(`Empcode: ${employee.employeeId || 'N/A'}`, 14, 30);
+  doc.text(`Name: ${employee.name || 'N/A'}`, 110, 30);
+  doc.text(`Report Month: ${formatMonth(monthStr)}`, 220, 25);
+
+  // Borders for meta
+  doc.setDrawColor(200, 200, 200);
+  doc.line(14, 21, 283, 21);
+  doc.line(14, 33, 283, 33);
+
+  // Date loop & Row processing
+  const [yearNum, monthNum] = monthStr.split('-').map(Number);
+  const daysCount = new Date(yearNum, monthNum, 0).getDate();
+
+  let totalWorkMins = 0;
+  let totalOTMins = 0;
+  let totalBreakMins = 0;
+
+  let presentCount = 0;
+  let halfDayCount = 0;
+  let leaveCount = 0;
+  let absentCount = 0;
+  let holidayCount = 0;
+
+  const tableData: any[] = [];
+
+  for (let d = 1; d <= daysCount; d++) {
+    const dayStr = String(d).padStart(2, '0');
+    const dateStr = `${yearNum}-${String(monthNum).padStart(2, '0')}-${dayStr}`;
+    const dObj = new Date(dateStr);
+    const isSunday = dObj.getDay() === 0;
+
+    const displayDate = `${dayStr}/${String(monthNum).padStart(2, '0')}/${yearNum}`;
+    const att = logs.find(l => l.date === dateStr);
+
+    let shift = 'G';
+    let inStr = '';
+    let out1Str = '';
+    let in2Str = '';
+    let outStr = '';
+    let workHrs = 0.0;
+    let otHrs = 0.0;
+    let breakMins = 0;
+
+    if (att) {
+      const isAbsentOrLeave = att.status === 'ABSENT' || att.status === 'LEAVE';
+      shift = isAbsentOrLeave ? 'X' : 'G';
+
+      if (att.status === 'PRESENT') presentCount++;
+      else if (att.status === 'HALF_DAY') halfDayCount++;
+      else if (att.status === 'LEAVE') leaveCount++;
+      else if (att.status === 'ABSENT') absentCount++;
+
+      if (!isAbsentOrLeave) {
+        inStr = att.punchIn ? att.punchIn.substring(0, 5) : '';
+        outStr = att.punchOut ? att.punchOut.substring(0, 5) : '';
+        workHrs = att.workingHours || 0.0;
+        totalWorkMins += workHrs * 60;
+
+        if (workHrs > 9.0) {
+          otHrs = workHrs - 9.0;
+          totalOTMins += otHrs * 60;
+        }
+
+        const inMins = parseTimeToMins(att.punchIn);
+        const outMins = parseTimeToMins(att.punchOut);
+        if (inMins !== null && outMins !== null) {
+          const elapsed = outMins - inMins;
+          const actualWork = workHrs * 60;
+          if (elapsed > actualWork) {
+            breakMins = elapsed - actualWork;
+            totalBreakMins += breakMins;
+
+            const lunchStartMins = inMins + 120;
+            out1Str = formatMinsToHHMM(lunchStartMins);
+            in2Str = formatMinsToHHMM(lunchStartMins + breakMins);
+          }
+        }
+      } else {
+        inStr = '--:--';
+        outStr = '--:--';
+      }
+    } else {
+      if (isSunday) {
+        shift = 'X';
+        inStr = '--:--';
+        outStr = '--:--';
+        holidayCount++;
+      } else {
+        shift = 'G';
+        absentCount++;
+      }
+    }
+
+    tableData.push([
+      displayDate, shift, inStr, out1Str, in2Str, '', '', '', '', '',
+      '', '', '', '', '', '', '', outStr, formatDecimalToHHMM(workHrs),
+      formatDecimalToHHMM(otHrs), formatMinsToHHMM(breakMins)
+    ]);
+  }
+
+  // Draw Table
+  autoTable(doc, {
+    startY: 36,
+    head: [[
+      'Date', 'Shift', 'IN', 'Out1', 'In2', 'Out2', 'In3', 'Out3', 'In4', 'Out4',
+      'In5', 'Out5', 'In6', 'Out6', 'In7', 'Out7', 'In8', 'Out', 'Work+OT', 'OT', 'Break'
+    ]],
+    body: tableData,
+    theme: 'grid',
+    styles: {
+      fontSize: 6.5,
+      cellPadding: 0.8,
+      halign: 'center'
+    },
+    headStyles: {
+      fillColor: [75, 85, 99],
+      textColor: [255, 255, 255],
+      fontSize: 6.5,
+      fontStyle: 'bold'
+    },
+    margin: { left: 14, right: 14 }
+  });
+
+  const finalY = (doc as any).lastAutoTable.finalY + 4;
+
+  // Render totals & summaries
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.text(`Total Work+OT Hrs:- ${formatMinsToHHMM(totalWorkMins)}`, 14, finalY);
+  doc.text(`Total OT Hrs:- ${formatMinsToHHMM(totalOTMins)}`, 90, finalY);
+  doc.text(`Total Break Hrs:- ${formatMinsToHHMM(totalBreakMins)}`, 170, finalY);
+
+  doc.setFontSize(8.5);
+  doc.setTextColor(5, 150, 105);
+  doc.text(`Total Pr.: ${presentCount + (halfDayCount * 0.5)}`, 14, finalY + 7);
+  doc.setTextColor(37, 99, 235);
+  doc.text(`Total Leave: ${leaveCount}`, 60, finalY + 7);
+  doc.setTextColor(217, 119, 6);
+  doc.text(`Total Half Days: ${halfDayCount}`, 110, finalY + 7);
+  doc.setTextColor(220, 38, 38);
+  doc.text(`Total Absent: ${absentCount}`, 160, finalY + 7);
+  doc.setTextColor(107, 114, 128);
+  doc.text(`Total Holidays: ${holidayCount}`, 210, finalY + 7);
+
+  doc.save(`Monthly_Attendance_Register_${employee.employeeId || 'Employee'}_${monthStr}.pdf`);
+}
+
+// ----------------------------------------------------
+// ALL EMPLOYEES COMPANY-WIDE MONTHLY ATTENDANCE MATRIX (REQ 3)
+// ----------------------------------------------------
+export async function exportCompanyWideToExcel(
+  companyName: string,
+  monthStr: string,
+  employees: HydratedUser[],
+  attendances: HydratedAttendance[],
+  deptName?: string
+) {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('Company Monthly Matrix');
+  worksheet.views = [{ showGridLines: true }];
+
+  // 1. Header Block
+  worksheet.mergeCells('A1:AI1');
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = `${companyName || 'Soching Education'} - Company-Wide Attendance Matrix`;
+  titleCell.font = { name: 'Arial', size: 14, bold: true };
+  titleCell.alignment = { horizontal: 'center' };
+
+  worksheet.mergeCells('A2:AI2');
+  const subCell = worksheet.getCell('A2');
+  subCell.value = `Month: ${formatMonth(monthStr)}${deptName ? ` | Department: ${deptName}` : ''}`;
+  subCell.font = { name: 'Arial', size: 10, italic: true };
+  subCell.alignment = { horizontal: 'center' };
+
+  // Calculate Days in Month
+  const [year, month] = monthStr.split('-').map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  // Columns: Employee ID, Name, Department, Days 1..31, Present, Absent, Leave, Hours
+  const headers = ['Emp ID', 'Name', 'Department'];
+  for (let d = 1; d <= daysInMonth; d++) {
+    headers.push(String(d));
+  }
+  headers.push('Present', 'Absent', 'Leave', 'Total Hours');
+
+  const headerRow = worksheet.getRow(4);
+  headerRow.values = headers;
+  headerRow.height = 24;
+  headers.forEach((_, idx) => {
+    const cell = headerRow.getCell(idx + 1);
+    cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '374151' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+  });
+
+  let currentExcelRow = 5;
+
+  employees.forEach((emp) => {
+    const rowValues: any[] = [emp.employeeId || 'N/A', emp.name || 'N/A', emp.department?.name || 'Default'];
+    const empLogs = attendances.filter(a => a.userId === emp.id && a.date.startsWith(monthStr));
+
+    let pCount = 0;
+    let aCount = 0;
+    let lCount = 0;
+    let totalHrs = 0;
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const log = empLogs.find(l => l.date === dateStr);
+      if (log) {
+        if (log.status === 'PRESENT') {
+          rowValues.push('P');
+          pCount++;
+          totalHrs += log.workingHours || 0;
+        } else if (log.status === 'HALF_DAY') {
+          rowValues.push('HD');
+          pCount += 0.5;
+          totalHrs += log.workingHours || 0;
+        } else if (log.status === 'LEAVE') {
+          rowValues.push('L');
+          lCount++;
+        } else if (log.status === 'ABSENT') {
+          rowValues.push('A');
+          aCount++;
+        }
+      } else {
+        const dObj = new Date(dateStr);
+        if (dObj.getDay() === 0) {
+          rowValues.push('W'); // Weekend
+        } else {
+          rowValues.push('-');
+          aCount++;
+        }
+      }
+    }
+
+    // Pad if daysInMonth is less than 31
+    for (let pad = daysInMonth + 1; pad <= 31; pad++) {
+      // Just for consistency if column layout has empty space
+    }
+
+    rowValues.push(pCount, aCount, lCount, parseFloat(totalHrs.toFixed(1)));
+
+    const row = worksheet.getRow(currentExcelRow);
+    row.values = rowValues;
+    row.height = 20;
+
+    for (let colIdx = 1; colIdx <= rowValues.length; colIdx++) {
+      const cell = row.getCell(colIdx);
+      cell.font = { name: 'Arial', size: 8.5 };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'E5E7EB' } },
+        bottom: { style: 'thin', color: { argb: 'E5E7EB' } },
+        left: { style: 'thin', color: { argb: 'E5E7EB' } },
+        right: { style: 'thin', color: { argb: 'E5E7EB' } }
+      };
+
+      // Styling abbreviations
+      const val = cell.value;
+      if (val === 'P') {
+        cell.font = { name: 'Arial', size: 8.5, bold: true, color: { argb: '047857' } };
+      } else if (val === 'A') {
+        cell.font = { name: 'Arial', size: 8.5, bold: true, color: { argb: 'B91C1C' } };
+      } else if (val === 'L') {
+        cell.font = { name: 'Arial', size: 8.5, bold: true, color: { argb: '1D4ED8' } };
+      } else if (val === 'HD') {
+        cell.font = { name: 'Arial', size: 8.5, bold: true, color: { argb: 'B45309' } };
+      }
+    }
+
+    currentExcelRow++;
+  });
+
+  // Export
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Company_Monthly_Matrix_${monthStr}.xlsx`;
+  a.click();
+  window.URL.revokeObjectURL(url);
+}
+
+export function exportCompanyWideToPDF(
+  companyName: string,
+  monthStr: string,
+  employees: HydratedUser[],
+  attendances: HydratedAttendance[],
+  deptName?: string
+) {
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+  // Top Bar
+  doc.setFillColor(31, 41, 55);
+  doc.rect(0, 0, 297, 16, 'F');
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
+  doc.text(`${companyName || 'Soching Education'} - Company-Wide Attendance Matrix`, 14, 10);
+
+  // Subtitle info
+  doc.setTextColor(55, 65, 81);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Month: ${formatMonth(monthStr)}${deptName ? ` | Department: ${deptName}` : ''}`, 14, 22);
+
+  const [year, month] = monthStr.split('-').map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+
+  const headers = ['Emp ID', 'Name', 'Dept'];
+  for (let d = 1; d <= daysInMonth; d++) {
+    headers.push(String(d));
+  }
+  headers.push('Pr', 'Ab', 'Lv', 'Hrs');
+
+  const tableData = employees.map((emp) => {
+    const row: any[] = [emp.employeeId || 'N/A', emp.name || 'N/A', emp.department?.name || 'Default'];
+    const empLogs = attendances.filter(a => a.userId === emp.id && a.date.startsWith(monthStr));
+
+    let pCount = 0;
+    let aCount = 0;
+    let lCount = 0;
+    let totalHrs = 0;
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const log = empLogs.find(l => l.date === dateStr);
+      if (log) {
+        if (log.status === 'PRESENT') {
+          row.push('P');
+          pCount++;
+          totalHrs += log.workingHours || 0;
+        } else if (log.status === 'HALF_DAY') {
+          row.push('HD');
+          pCount += 0.5;
+          totalHrs += log.workingHours || 0;
+        } else if (log.status === 'LEAVE') {
+          row.push('L');
+          lCount++;
+        } else if (log.status === 'ABSENT') {
+          row.push('A');
+          aCount++;
+        }
+      } else {
+        const dObj = new Date(dateStr);
+        if (dObj.getDay() === 0) {
+          row.push('W');
+        } else {
+          row.push('-');
+          aCount++;
+        }
+      }
+    }
+
+    row.push(pCount, aCount, lCount, totalHrs.toFixed(1));
+    return row;
+  });
+
+  autoTable(doc, {
+    startY: 26,
+    head: [headers],
+    body: tableData,
+    theme: 'grid',
+    styles: {
+      fontSize: 5.5,
+      cellPadding: 0.5,
+      halign: 'center'
+    },
+    headStyles: {
+      fillColor: [55, 65, 81],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold'
+    },
+    columnStyles: {
+      1: { halign: 'left', cellWidth: 22 } // Employee name wider
+    },
+    didParseCell: (data: any) => {
+      if (data.section === 'body' && data.column.index >= 3) {
+        const val = data.cell.raw;
+        if (val === 'P') {
+          data.cell.styles.textColor = [4, 120, 87];
+          data.cell.styles.fontStyle = 'bold';
+        } else if (val === 'A') {
+          data.cell.styles.textColor = [185, 28, 28];
+          data.cell.styles.fontStyle = 'bold';
+        } else if (val === 'L') {
+          data.cell.styles.textColor = [29, 78, 216];
+          data.cell.styles.fontStyle = 'bold';
+        } else if (val === 'HD') {
+          data.cell.styles.textColor = [180, 83, 9];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
+    },
+    margin: { left: 10, right: 10 }
+  });
+
+  doc.save(`Company_Monthly_Matrix_${monthStr}.pdf`);
+}
