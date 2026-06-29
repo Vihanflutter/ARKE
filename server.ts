@@ -388,11 +388,12 @@ async function startServer() {
     try {
       const body = manualAttendanceSchema.parse(req.body);
       
+      const isAbsentOrLeave = body.status === 'ABSENT' || body.status === 'LEAVE';
       let workingHours = 0.0;
       let lateMins = 0;
 
-      const punchInStr = (body.punchIn && body.punchIn.trim() !== '') ? body.punchIn : undefined;
-      const punchOutStr = (body.punchOut && body.punchOut.trim() !== '') ? body.punchOut : undefined;
+      const punchInStr = (!isAbsentOrLeave && body.punchIn && body.punchIn.trim() !== '') ? body.punchIn : undefined;
+      const punchOutStr = (!isAbsentOrLeave && body.punchOut && body.punchOut.trim() !== '') ? body.punchOut : undefined;
 
       if (punchInStr && punchOutStr) {
         const [inH, inM] = punchInStr.split(':').map(Number);

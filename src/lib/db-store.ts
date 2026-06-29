@@ -497,36 +497,44 @@ export const db = {
 
       if (existingIdx !== -1) {
         const existing = dbData.attendances[existingIdx];
+        const isAbsentOrLeave = data.status === 'ABSENT' || (data.status === 'LEAVE' && !data.punchIn && !data.punchOut);
+
+        const updatedPunchIn = isAbsentOrLeave ? undefined : (data.punchIn !== undefined ? data.punchIn : existing.punchIn);
+        const updatedPunchOut = isAbsentOrLeave ? undefined : (data.punchOut !== undefined ? data.punchOut : existing.punchOut);
+        const updatedWorkingHours = isAbsentOrLeave ? 0.0 : (data.workingHours !== undefined ? data.workingHours : existing.workingHours);
+        const updatedLate = isAbsentOrLeave ? 0 : (data.late !== undefined ? data.late : existing.late);
+        const updatedStatus = isAbsentOrLeave ? data.status : computedStatus(updatedWorkingHours, data.status || existing.status, updatedPunchIn, updatedPunchOut);
+
         const updated = {
           ...existing,
           ...data,
-          workingHours: data.workingHours !== undefined ? data.workingHours : existing.workingHours,
-          status: computedStatus(
-            data.workingHours !== undefined ? data.workingHours : existing.workingHours,
-            data.status || existing.status,
-            data.punchIn || existing.punchIn,
-            data.punchOut || existing.punchOut
-          ) as any,
+          punchIn: updatedPunchIn,
+          punchOut: updatedPunchOut,
+          workingHours: updatedWorkingHours,
+          late: updatedLate,
+          status: updatedStatus as any,
           updatedAt: new Date().toISOString()
         };
         dbData.attendances[existingIdx] = updated;
         saveDb(dbData);
         return updated;
       } else {
+        const isAbsentOrLeave = data.status === 'ABSENT' || (data.status === 'LEAVE' && !data.punchIn && !data.punchOut);
+        const finalPunchIn = isAbsentOrLeave ? undefined : data.punchIn;
+        const finalPunchOut = isAbsentOrLeave ? undefined : data.punchOut;
+        const finalWorkingHours = isAbsentOrLeave ? 0.0 : (data.workingHours || 0.0);
+        const finalLate = isAbsentOrLeave ? 0 : (data.late || 0);
+        const finalStatus = isAbsentOrLeave ? data.status : computedStatus(finalWorkingHours, data.status, finalPunchIn, finalPunchOut);
+
         const newRecord: Attendance = {
           id: `att-${userId}-${date}`,
           userId,
           date,
-          punchIn: data.punchIn || undefined,
-          punchOut: data.punchOut || undefined,
-          workingHours: data.workingHours || 0.0,
-          status: computedStatus(
-            data.workingHours || 0.0,
-            data.status,
-            data.punchIn,
-            data.punchOut
-          ) as any,
-          late: data.late || 0,
+          punchIn: finalPunchIn || undefined,
+          punchOut: finalPunchOut || undefined,
+          workingHours: finalWorkingHours,
+          status: finalStatus as any,
+          late: finalLate,
           remarks: data.remarks || '',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()

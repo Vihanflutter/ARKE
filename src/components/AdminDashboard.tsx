@@ -57,6 +57,9 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
   const [showPassReset, setShowPassReset] = useState(false);
   const [passwordResetModal, setPasswordResetModal] = useState<{ open: boolean; userId?: string; userName?: string }>({ open: false });
   const [manualAttendanceModal, setManualAttendanceModal] = useState<{ open: boolean; record?: HydratedAttendance }>({ open: false });
+  const [manualStatus, setManualStatus] = useState<AttendanceStatus>('PRESENT');
+  const [manualPunchIn, setManualPunchIn] = useState<string>('09:00');
+  const [manualPunchOut, setManualPunchOut] = useState<string>('18:00');
   const [leaveRemarksModal, setLeaveRemarksModal] = useState<{ open: boolean; leave?: HydratedLeaveRequest; action?: 'approve' | 'reject' }>({ open: false });
 
   // Confirmation Modal State
@@ -135,6 +138,20 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
   useEffect(() => {
     loadAllData();
   }, [activeTab]);
+
+  useEffect(() => {
+    if (manualAttendanceModal.open) {
+      if (manualAttendanceModal.record) {
+        setManualStatus(manualAttendanceModal.record.status);
+        setManualPunchIn(manualAttendanceModal.record.punchIn?.substring(0, 5) || '09:00');
+        setManualPunchOut(manualAttendanceModal.record.punchOut?.substring(0, 5) || '18:00');
+      } else {
+        setManualStatus('PRESENT');
+        setManualPunchIn('09:00');
+        setManualPunchOut('18:00');
+      }
+    }
+  }, [manualAttendanceModal]);
 
   const showMsg = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
@@ -327,12 +344,13 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
     e.preventDefault();
     setOperationLoading(true);
     const formData = new FormData(e.currentTarget);
+    const isAbsentOrLeave = manualStatus === 'ABSENT' || manualStatus === 'LEAVE';
     const manualData = {
       userId: (formData.get('userId') as string) || manualAttendanceModal.record?.userId || '',
       date: (formData.get('date') as string) || manualAttendanceModal.record?.date || '',
-      punchIn: formData.get('punchIn') as string || undefined,
-      punchOut: formData.get('punchOut') as string || undefined,
-      status: formData.get('status') as string,
+      punchIn: isAbsentOrLeave ? undefined : (formData.get('punchIn') as string || undefined),
+      punchOut: isAbsentOrLeave ? undefined : (formData.get('punchOut') as string || undefined),
+      status: manualStatus,
       remarks: formData.get('remarks') as string,
     };
 
@@ -1939,7 +1957,8 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                   <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Status</label>
                   <select
                     name="status"
-                    defaultValue={manualAttendanceModal.record?.status || 'PRESENT'}
+                    value={manualStatus}
+                    onChange={(e) => setManualStatus(e.target.value as AttendanceStatus)}
                     className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none bg-white font-semibold text-slate-800"
                   >
                     <option value="PRESENT">Present</option>
@@ -1956,8 +1975,10 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                   <input
                     type="time"
                     name="punchIn"
-                    defaultValue={manualAttendanceModal.record?.punchIn?.substring(0, 5) || '09:00'}
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-blue-500"
+                    disabled={manualStatus === 'ABSENT' || manualStatus === 'LEAVE'}
+                    value={(manualStatus === 'ABSENT' || manualStatus === 'LEAVE') ? '' : manualPunchIn}
+                    onChange={(e) => setManualPunchIn(e.target.value)}
+                    className={`w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-blue-500 ${(manualStatus === 'ABSENT' || manualStatus === 'LEAVE') ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white'}`}
                   />
                 </div>
                 <div>
@@ -1965,8 +1986,10 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                   <input
                     type="time"
                     name="punchOut"
-                    defaultValue={manualAttendanceModal.record?.punchOut?.substring(0, 5) || '18:00'}
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-blue-500"
+                    disabled={manualStatus === 'ABSENT' || manualStatus === 'LEAVE'}
+                    value={(manualStatus === 'ABSENT' || manualStatus === 'LEAVE') ? '' : manualPunchOut}
+                    onChange={(e) => setManualPunchOut(e.target.value)}
+                    className={`w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-blue-500 ${(manualStatus === 'ABSENT' || manualStatus === 'LEAVE') ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white'}`}
                   />
                 </div>
               </div>
