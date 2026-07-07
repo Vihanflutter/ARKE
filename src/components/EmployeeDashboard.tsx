@@ -22,6 +22,8 @@ export default function EmployeeDashboard({ currentUser, onLogout }: EmployeeDas
   const [personalLeaves, setPersonalLeaves] = useState<HydratedLeaveRequest[]>([]);
   const [settings, setSettings] = useState<CompanySettings | null>(null);
   const [todayLog, setTodayLog] = useState<HydratedAttendance | null>(null);
+  const [freshUser, setFreshUser] = useState<HydratedUser | null>(null);
+  const [balanceLogs, setBalanceLogs] = useState<any[]>([]);
 
   // Stats
   const [summaryStats, setSummaryStats] = useState({
@@ -71,6 +73,17 @@ export default function EmployeeDashboard({ currentUser, onLogout }: EmployeeDas
       // 3. Fetch Settings
       const settingsRes = await apiRequest<CompanySettings>('/api/settings');
       setSettings(settingsRes);
+
+      // 4. Fetch fresh user details for balance state
+      const employees = await apiRequest<HydratedUser[]>('/api/employees');
+      const me = employees.find(e => e.id === currentUser.id);
+      if (me) {
+        setFreshUser(me);
+      }
+
+      // 5. Fetch personal balance logs
+      const balanceLogsRes = await apiRequest<any[]>(`/api/leaves/balance-history?userId=${currentUser.id}`);
+      setBalanceLogs(balanceLogsRes);
 
       // 4. Calculate summary stats
       let present = 0;
@@ -533,6 +546,26 @@ export default function EmployeeDashboard({ currentUser, onLogout }: EmployeeDas
                       </button>
                     </div>
 
+                    {/* Available Balances Grid */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                        <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">Casual Leave (CL)</span>
+                        <span className="text-xl font-bold text-slate-800 mt-1 block">{(freshUser || currentUser).casualBalance ?? 0} days</span>
+                      </div>
+                      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                        <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">Sick Leave (SL)</span>
+                        <span className="text-xl font-bold text-slate-800 mt-1 block">{(freshUser || currentUser).sickBalance ?? 0} days</span>
+                      </div>
+                      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                        <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">Earned Leave (EL)</span>
+                        <span className="text-xl font-bold text-slate-800 mt-1 block">{(freshUser || currentUser).earnedBalance ?? 0} days</span>
+                      </div>
+                      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                        <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">Compensatory Leave (CO)</span>
+                        <span className="text-xl font-bold text-slate-800 mt-1 block">{(freshUser || currentUser).compensatoryBalance ?? 0} days</span>
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-1 gap-4">
                       {personalLeaves.length === 0 ? (
                         <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 text-xs font-medium">
@@ -582,6 +615,55 @@ export default function EmployeeDashboard({ currentUser, onLogout }: EmployeeDas
                         ))
                       )}
                     </div>
+
+                    {/* Balance History Logs */}
+                    {balanceLogs.length > 0 && (
+                      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm mt-6">
+                        <div className="p-4 bg-slate-50 border-b border-slate-200">
+                          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">My Leave Balance Adjustments History</h3>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm text-left">
+                            <thead className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-wider border-b border-slate-200">
+                              <tr>
+                                <th className="px-5 py-2.5">Leave Type</th>
+                                <th className="px-5 py-2.5 text-center">Previous</th>
+                                <th className="px-5 py-2.5 text-center">New Balance</th>
+                                <th className="px-5 py-2.5 text-center">Change</th>
+                                <th className="px-5 py-2.5">Adjusted By</th>
+                                <th className="px-5 py-2.5">Reason</th>
+                                <th className="px-5 py-2.5 text-right">Date</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-150 text-xs">
+                              {balanceLogs.map((log) => {
+                                const diff = log.newBalance - log.previousBalance;
+                                return (
+                                  <tr key={log.id} className="hover:bg-slate-50 transition-colors text-slate-700">
+                                    <td className="px-5 py-3 font-semibold uppercase">{log.leaveType.replace('_', ' ')}</td>
+                                    <td className="px-5 py-3 text-center text-slate-400">{log.previousBalance}</td>
+                                    <td className="px-5 py-3 text-center font-bold text-slate-900">{log.newBalance}</td>
+                                    <td className="px-5 py-3 text-center">
+                                      {diff > 0 ? (
+                                        <span className="text-green-600 font-bold">+{diff}</span>
+                                      ) : diff < 0 ? (
+                                        <span className="text-red-600 font-bold">{diff}</span>
+                                      ) : (
+                                        <span className="text-slate-400 font-medium">No Change</span>
+                                      )}
+                                    </td>
+                                    <td className="px-5 py-3 text-slate-500">{log.changedByName}</td>
+                                    <td className="px-5 py-3 text-slate-600 max-w-[220px] truncate" title={log.reason}>{log.reason}</td>
+                                    <td className="px-5 py-3 text-right text-slate-400 font-mono text-[10px]">{new Date(log.createdAt).toLocaleDateString()}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
                   </div>
                 )}
 

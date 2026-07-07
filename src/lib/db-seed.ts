@@ -29,6 +29,10 @@ export function getSeedData() {
     halfDayHours: 4.0,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
+    casualEntitlement: 12,
+    sickEntitlement: 10,
+    earnedEntitlement: 15,
+    compensatoryEntitlement: 0,
   };
 
   const users: User[] = [
@@ -45,6 +49,10 @@ export function getSeedData() {
       joiningDate: '2025-01-15',
       createdAt: '2025-01-15T09:00:00.000Z',
       updatedAt: '2025-01-15T09:00:00.000Z',
+      casualBalance: 12,
+      sickBalance: 10,
+      earnedBalance: 15,
+      compensatoryBalance: 0,
     },
   ];
 

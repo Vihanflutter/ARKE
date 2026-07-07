@@ -176,6 +176,10 @@ async function startServer() {
     designationId: z.string().optional(),
     managerId: z.string().optional(),
     password: z.string().min(4, 'Password must be at least 4 chars'),
+    casualBalance: z.number().optional(),
+    sickBalance: z.number().optional(),
+    earnedBalance: z.number().optional(),
+    compensatoryBalance: z.number().optional(),
   });
 
   app.get('/api/employees', (req, res) => {
@@ -206,7 +210,16 @@ async function startServer() {
       const existingEmpId = db.users.findUnique(u => u.employeeId.toLowerCase() === body.employeeId.toLowerCase());
       if (existingEmpId) return res.status(400).json({ error: 'Employee ID already exists' });
 
-      const created = db.users.create(body);
+      const settings = db.companySettings.find();
+      const finalBody = {
+        ...body,
+        casualBalance: body.casualBalance !== undefined ? body.casualBalance : (settings.casualEntitlement ?? 12),
+        sickBalance: body.sickBalance !== undefined ? body.sickBalance : (settings.sickEntitlement ?? 10),
+        earnedBalance: body.earnedBalance !== undefined ? body.earnedBalance : (settings.earnedEntitlement ?? 15),
+        compensatoryBalance: body.compensatoryBalance !== undefined ? body.compensatoryBalance : (settings.compensatoryEntitlement ?? 0),
+      };
+
+      const created = db.users.create(finalBody as any);
       res.status(201).json(db.hydrateUser(created));
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -460,10 +473,25 @@ async function startServer() {
     }
   });
 
-  // --- LEAVE REQUESTS ---
+  // --- LEAVE REQUESTS & BALANCE MANAGEMENT ---
+  function calculateLeaveDays(startDateStr: string, endDateStr: string): number {
+    const start = new Date(startDateStr);
+    const end = new Date(endDateStr);
+    let days = 0;
+    const current = new Date(start);
+    while (current <= end) {
+      const dayOfWeek = current.getDay();
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) { // exclude Sunday and Saturday
+        days++;
+      }
+      current.setDate(current.getDate() + 1);
+    }
+    return days > 0 ? days : 1; // fallback to at least 1 day
+  }
+
   const applyLeaveSchema = z.object({
     userId: z.string(),
-    leaveType: z.enum(['CASUAL_LEAVE', 'SICK_LEAVE', 'EARNED_LEAVE', 'HALF_DAY']),
+    leaveType: z.enum(['CASUAL_LEAVE', 'SICK_LEAVE', 'EARNED_LEAVE', 'COMPENSATORY_LEAVE']),
     startDate: z.string(), // YYYY-MM-DD
     endDate: z.string(), // YYYY-MM-DD
     remarks: z.string().optional(),
@@ -503,7 +531,47 @@ async function startServer() {
   app.post('/api/leaves', (req, res) => {
     try {
       const body = applyLeaveSchema.parse(req.body);
-      const created = db.leaveRequests.create(body);
+
+      // 1. Validate Date Range
+      const start = new Date(body.startDate);
+      const end = new Date(body.endDate);
+      if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
+        return res.status(400).json({ error: 'Invalid date range selected' });
+      }
+
+      // 2. Overlapping Leave Verification
+      const existingLeaves = db.leaveRequests.findMany().filter(l => l.userId === body.userId && l.status !== 'REJECTED');
+      const overlaps = existingLeaves.some(l => {
+        return (body.startDate <= l.endDate) && (body.endDate >= l.startDate);
+      });
+      if (overlaps) {
+        return res.status(400).json({ error: 'An overlapping leave request already exists for this period.' });
+      }
+
+      // 3. Check Leave Balance
+      const user = db.users.findUnique(u => u.id === body.userId);
+      if (!user) return res.status(404).json({ error: 'Employee not found' });
+
+      const leaveDays = calculateLeaveDays(body.startDate, body.endDate);
+      
+      let balance = 0;
+      if (body.leaveType === 'CASUAL_LEAVE') {
+        balance = user.casualBalance ?? 0;
+      } else if (body.leaveType === 'SICK_LEAVE') {
+        balance = user.sickBalance ?? 0;
+      } else if (body.leaveType === 'EARNED_LEAVE') {
+        balance = user.earnedBalance ?? 0;
+      } else if (body.leaveType === 'COMPENSATORY_LEAVE') {
+        balance = user.compensatoryBalance ?? 0;
+      }
+
+      if (leaveDays > balance) {
+        return res.status(400).json({ 
+          error: `Insufficient leave balance. Requested: ${leaveDays} days, Available: ${balance} days.` 
+        });
+      }
+
+      const created = db.leaveRequests.create(body as any);
       res.status(201).json(db.hydrateLeaveRequest(created));
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -516,6 +584,60 @@ async function startServer() {
   app.put('/api/leaves/:id', (req, res) => {
     try {
       const body = reviewLeaveSchema.parse(req.body);
+      
+      // Load current request first
+      const existingRequest = db.leaveRequests.findMany().find(l => l.id === req.params.id);
+      if (!existingRequest) return res.status(404).json({ error: 'Leave request not found' });
+
+      const user = db.users.findUnique(u => u.id === existingRequest.userId);
+      if (!user) return res.status(404).json({ error: 'Employee not found' });
+
+      const leaveDays = calculateLeaveDays(existingRequest.startDate, existingRequest.endDate);
+
+      // If transition from not APPROVED to APPROVED:
+      if (body.status === 'APPROVED' && existingRequest.status !== 'APPROVED') {
+        let balance = 0;
+        let field: 'casualBalance' | 'sickBalance' | 'earnedBalance' | 'compensatoryBalance';
+        if (existingRequest.leaveType === 'CASUAL_LEAVE') {
+          balance = user.casualBalance ?? 0;
+          field = 'casualBalance';
+        } else if (existingRequest.leaveType === 'SICK_LEAVE') {
+          balance = user.sickBalance ?? 0;
+          field = 'sickBalance';
+        } else if (existingRequest.leaveType === 'EARNED_LEAVE') {
+          balance = user.earnedBalance ?? 0;
+          field = 'earnedBalance';
+        } else {
+          balance = user.compensatoryBalance ?? 0;
+          field = 'compensatoryBalance';
+        }
+
+        if (leaveDays > balance) {
+          return res.status(400).json({ 
+            error: `Insufficient leave balance to approve. Needed: ${leaveDays} days, Available: ${balance} days.` 
+          });
+        }
+
+        // Deduct balance
+        db.users.update(user.id, { [field]: balance - leaveDays });
+      }
+
+      // If transition from APPROVED to REJECTED (revoked):
+      if (body.status !== 'APPROVED' && existingRequest.status === 'APPROVED') {
+        let field: 'casualBalance' | 'sickBalance' | 'earnedBalance' | 'compensatoryBalance';
+        if (existingRequest.leaveType === 'CASUAL_LEAVE') {
+          field = 'casualBalance';
+        } else if (existingRequest.leaveType === 'SICK_LEAVE') {
+          field = 'sickBalance';
+        } else if (existingRequest.leaveType === 'EARNED_LEAVE') {
+          field = 'earnedBalance';
+        } else {
+          field = 'compensatoryBalance';
+        }
+        const currentBal = user[field] ?? 0;
+        db.users.update(user.id, { [field]: currentBal + leaveDays });
+      }
+
       const updated = db.leaveRequests.update(req.params.id, body);
       res.json(db.hydrateLeaveRequest(updated));
     } catch (err) {
@@ -528,11 +650,280 @@ async function startServer() {
 
   app.delete('/api/leaves/:id', (req, res) => {
     try {
+      const existingRequest = db.leaveRequests.findMany().find(l => l.id === req.params.id);
+      if (!existingRequest) return res.status(404).json({ error: 'Leave request not found' });
+
+      // If approved, restore balance before deleting
+      if (existingRequest.status === 'APPROVED') {
+        const user = db.users.findUnique(u => u.id === existingRequest.userId);
+        if (user) {
+          const leaveDays = calculateLeaveDays(existingRequest.startDate, existingRequest.endDate);
+          let field: 'casualBalance' | 'sickBalance' | 'earnedBalance' | 'compensatoryBalance';
+          if (existingRequest.leaveType === 'CASUAL_LEAVE') {
+            field = 'casualBalance';
+          } else if (existingRequest.leaveType === 'SICK_LEAVE') {
+            field = 'sickBalance';
+          } else if (existingRequest.leaveType === 'EARNED_LEAVE') {
+            field = 'earnedBalance';
+          } else {
+            field = 'compensatoryBalance';
+          }
+          const currentBal = user[field] ?? 0;
+          db.users.update(user.id, { [field]: currentBal + leaveDays });
+        }
+      }
+
       const success = db.leaveRequests.delete(req.params.id);
       if (!success) return res.status(404).json({ error: 'Leave request not found' });
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: 'Failed to cancel leave request' });
+    }
+  });
+
+  // --- MANUAL BALANCE ADJUSTMENT ---
+  app.post('/api/employees/:id/leave-balance', (req, res) => {
+    try {
+      const userId = req.params.id;
+      const body = z.object({
+        leaveType: z.enum(['CASUAL_LEAVE', 'SICK_LEAVE', 'EARNED_LEAVE', 'COMPENSATORY_LEAVE']),
+        action: z.enum(['increase', 'decrease', 'set']),
+        amount: z.number().nonnegative('Amount must be non-negative'),
+        reason: z.string().min(1, 'Reason is required'),
+        changedById: z.string(),
+        changedByName: z.string()
+      }).parse(req.body);
+
+      const user = db.users.findUnique(u => u.id === userId);
+      if (!user) return res.status(404).json({ error: 'Employee not found' });
+
+      let prevBal = 0;
+      let balanceField: 'casualBalance' | 'sickBalance' | 'earnedBalance' | 'compensatoryBalance';
+      if (body.leaveType === 'CASUAL_LEAVE') {
+        prevBal = user.casualBalance ?? 0;
+        balanceField = 'casualBalance';
+      } else if (body.leaveType === 'SICK_LEAVE') {
+        prevBal = user.sickBalance ?? 0;
+        balanceField = 'sickBalance';
+      } else if (body.leaveType === 'EARNED_LEAVE') {
+        prevBal = user.earnedBalance ?? 0;
+        balanceField = 'earnedBalance';
+      } else {
+        prevBal = user.compensatoryBalance ?? 0;
+        balanceField = 'compensatoryBalance';
+      }
+
+      let newBal = prevBal;
+      if (body.action === 'increase') {
+        newBal = prevBal + body.amount;
+      } else if (body.action === 'decrease') {
+        newBal = prevBal - body.amount;
+      } else {
+        newBal = body.amount;
+      }
+
+      if (newBal < 0) {
+        return res.status(400).json({ error: 'Leave balance cannot be negative.' });
+      }
+
+      const updatedUser = db.users.update(userId, { [balanceField]: newBal });
+
+      db.leaveBalanceLogs.create({
+        userId,
+        leaveType: body.leaveType,
+        previousBalance: prevBal,
+        newBalance: newBal,
+        changedById: body.changedById,
+        changedByName: body.changedByName,
+        reason: body.reason
+      });
+
+      res.json(db.hydrateUser(updatedUser));
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: err.issues[0].message });
+      }
+      res.status(500).json({ error: 'Failed to update leave balance' });
+    }
+  });
+
+  // --- BULK BALANCE ADJUSTMENT ---
+  app.post('/api/employees/bulk-leave-balance', (req, res) => {
+    try {
+      const body = z.object({
+        userIds: z.array(z.string()),
+        leaveType: z.enum(['CASUAL_LEAVE', 'SICK_LEAVE', 'EARNED_LEAVE', 'COMPENSATORY_LEAVE']),
+        action: z.enum(['increase', 'decrease', 'set']),
+        amount: z.number().nonnegative(),
+        reason: z.string().min(1, 'Reason is required'),
+        changedById: z.string(),
+        changedByName: z.string()
+      }).parse(req.body);
+
+      for (const userId of body.userIds) {
+        const user = db.users.findUnique(u => u.id === userId);
+        if (!user) continue;
+
+        let prevBal = 0;
+        let balanceField: 'casualBalance' | 'sickBalance' | 'earnedBalance' | 'compensatoryBalance';
+        if (body.leaveType === 'CASUAL_LEAVE') {
+          prevBal = user.casualBalance ?? 0;
+          balanceField = 'casualBalance';
+        } else if (body.leaveType === 'SICK_LEAVE') {
+          prevBal = user.sickBalance ?? 0;
+          balanceField = 'sickBalance';
+        } else if (body.leaveType === 'EARNED_LEAVE') {
+          prevBal = user.earnedBalance ?? 0;
+          balanceField = 'earnedBalance';
+        } else {
+          prevBal = user.compensatoryBalance ?? 0;
+          balanceField = 'compensatoryBalance';
+        }
+
+        let newBal = prevBal;
+        if (body.action === 'increase') {
+          newBal = prevBal + body.amount;
+        } else if (body.action === 'decrease') {
+          newBal = prevBal - body.amount;
+        } else {
+          newBal = body.amount;
+        }
+
+        if (newBal < 0) {
+          newBal = 0;
+        }
+
+        db.users.update(userId, { [balanceField]: newBal });
+
+        db.leaveBalanceLogs.create({
+          userId,
+          leaveType: body.leaveType,
+          previousBalance: prevBal,
+          newBalance: newBal,
+          changedById: body.changedById,
+          changedByName: body.changedByName,
+          reason: body.reason + ' (Bulk Update)'
+        });
+      }
+
+      res.json({ success: true, message: 'Bulk leave balance update completed.' });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: err.issues[0].message });
+      }
+      res.status(500).json({ error: 'Bulk update failed' });
+    }
+  });
+
+  // --- LEAVE BALANCES RESET ---
+  app.post('/api/employees/reset-leave-balances', (req, res) => {
+    try {
+      const body = z.object({
+        changedById: z.string(),
+        changedByName: z.string(),
+        reason: z.string().min(1, 'Reason is required')
+      }).parse(req.body);
+
+      const settings = db.companySettings.find();
+      const allUsers = db.users.findMany();
+
+      allUsers.forEach(user => {
+        if (user.role === 'ADMIN') return;
+
+        const pCasual = user.casualBalance ?? 0;
+        const pSick = user.sickBalance ?? 0;
+        const pEarned = user.earnedBalance ?? 0;
+        const pComp = user.compensatoryBalance ?? 0;
+
+        const nCasual = settings.casualEntitlement ?? 12;
+        const nSick = settings.sickEntitlement ?? 10;
+        const nEarned = settings.earnedEntitlement ?? 15;
+        const nComp = settings.compensatoryEntitlement ?? 0;
+
+        db.users.update(user.id, {
+          casualBalance: nCasual,
+          sickBalance: nSick,
+          earnedBalance: nEarned,
+          compensatoryBalance: nComp
+        });
+
+        if (pCasual !== nCasual) {
+          db.leaveBalanceLogs.create({
+            userId: user.id,
+            leaveType: 'CASUAL_LEAVE',
+            previousBalance: pCasual,
+            newBalance: nCasual,
+            changedById: body.changedById,
+            changedByName: body.changedByName,
+            reason: body.reason + ' (Yearly Reset)'
+          });
+        }
+        if (pSick !== nSick) {
+          db.leaveBalanceLogs.create({
+            userId: user.id,
+            leaveType: 'SICK_LEAVE',
+            previousBalance: pSick,
+            newBalance: nSick,
+            changedById: body.changedById,
+            changedByName: body.changedByName,
+            reason: body.reason + ' (Yearly Reset)'
+          });
+        }
+        if (pEarned !== nEarned) {
+          db.leaveBalanceLogs.create({
+            userId: user.id,
+            leaveType: 'EARNED_LEAVE',
+            previousBalance: pEarned,
+            newBalance: nEarned,
+            changedById: body.changedById,
+            changedByName: body.changedByName,
+            reason: body.reason + ' (Yearly Reset)'
+          });
+        }
+        if (pComp !== nComp) {
+          db.leaveBalanceLogs.create({
+            userId: user.id,
+            leaveType: 'COMPENSATORY_LEAVE',
+            previousBalance: pComp,
+            newBalance: nComp,
+            changedById: body.changedById,
+            changedByName: body.changedByName,
+            reason: body.reason + ' (Yearly Reset)'
+          });
+        }
+      });
+
+      res.json({ success: true, message: 'All active employee leave balances reset successfully.' });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ error: err.issues[0].message });
+      }
+      res.status(500).json({ error: 'Reset failed' });
+    }
+  });
+
+  // --- LEAVE AUDIT HISTORY ---
+  app.get('/api/leaves/balance-history', (req, res) => {
+    try {
+      const { userId } = req.query;
+      let logs = db.leaveBalanceLogs.findMany();
+      if (userId) {
+        logs = logs.filter(l => l.userId === userId);
+      }
+      logs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      
+      const hydrated = logs.map(l => {
+        const user = db.users.findUnique(u => u.id === l.userId);
+        return {
+          ...l,
+          employeeName: user ? user.name : 'Unknown',
+          employeeId: user ? user.employeeId : ''
+        };
+      });
+      
+      res.json(hydrated);
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to fetch leave balance history' });
     }
   });
 
@@ -617,6 +1008,10 @@ async function startServer() {
         officeEndTime: z.string(),
         graceTimeMinutes: z.number().min(0),
         halfDayHours: z.number().min(1),
+        casualEntitlement: z.number().min(0),
+        sickEntitlement: z.number().min(0),
+        earnedEntitlement: z.number().min(0),
+        compensatoryEntitlement: z.number().min(0),
       });
       const body = settingsSchema.parse(req.body);
       const updated = db.companySettings.update(body);

@@ -1,4 +1,4 @@
-import { User, Department, Designation, Attendance, LeaveRequest, CompanySettings, HydratedUser, HydratedAttendance, HydratedLeaveRequest } from '../types';
+import { User, Department, Designation, Attendance, LeaveRequest, CompanySettings, HydratedUser, HydratedAttendance, HydratedLeaveRequest, LeaveBalanceAuditLog } from '../types';
 import { getSeedData } from './db-seed';
 
 interface DatabaseSchema {
@@ -8,6 +8,7 @@ interface DatabaseSchema {
   attendances: Attendance[];
   leaveRequests: LeaveRequest[];
   companySettings: CompanySettings;
+  leaveBalanceLogs?: LeaveBalanceAuditLog[];
   lastUpdated?: string;
 }
 
@@ -66,6 +67,73 @@ function selfHealDatabase(dbData: DatabaseSchema) {
 
   const seenIds = new Set<string>();
   let modified = false;
+
+  // Ensure leaveBalanceLogs exists
+  if (!dbData.leaveBalanceLogs) {
+    dbData.leaveBalanceLogs = [];
+    modified = true;
+  }
+
+  // Ensure companySettings has entitlements
+  if (!dbData.companySettings) {
+    dbData.companySettings = {
+      id: 'settings-global',
+      companyName: 'Arke',
+      officeStartTime: '09:00',
+      officeEndTime: '18:00',
+      graceTimeMinutes: 15,
+      halfDayHours: 4.0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      casualEntitlement: 12,
+      sickEntitlement: 10,
+      earnedEntitlement: 15,
+      compensatoryEntitlement: 0
+    };
+    modified = true;
+  } else {
+    if (dbData.companySettings.casualEntitlement === undefined) {
+      dbData.companySettings.casualEntitlement = 12;
+      modified = true;
+    }
+    if (dbData.companySettings.sickEntitlement === undefined) {
+      dbData.companySettings.sickEntitlement = 10;
+      modified = true;
+    }
+    if (dbData.companySettings.earnedEntitlement === undefined) {
+      dbData.companySettings.earnedEntitlement = 15;
+      modified = true;
+    }
+    if (dbData.companySettings.compensatoryEntitlement === undefined) {
+      dbData.companySettings.compensatoryEntitlement = 0;
+      modified = true;
+    }
+  }
+
+  // Ensure all users have leave balances
+  const casualEnt = dbData.companySettings.casualEntitlement ?? 12;
+  const sickEnt = dbData.companySettings.sickEntitlement ?? 10;
+  const earnedEnt = dbData.companySettings.earnedEntitlement ?? 15;
+  const compEnt = dbData.companySettings.compensatoryEntitlement ?? 0;
+
+  dbData.users.forEach(u => {
+    if (u.casualBalance === undefined) {
+      u.casualBalance = casualEnt;
+      modified = true;
+    }
+    if (u.sickBalance === undefined) {
+      u.sickBalance = sickEnt;
+      modified = true;
+    }
+    if (u.earnedBalance === undefined) {
+      u.earnedBalance = earnedEnt;
+      modified = true;
+    }
+    if (u.compensatoryBalance === undefined) {
+      u.compensatoryBalance = compEnt;
+      modified = true;
+    }
+  });
 
   // We keep a mapping of original array index to its new ID (if changed)
   const changedIds: { index: number; oldId: string; newId: string }[] = [];
@@ -661,6 +729,26 @@ export const db = {
       recalculateAllAttendances(dbData);
       saveDb(dbData);
       return updated;
+    }
+  },
+
+  // --- LEAVE BALANCE LOGS ---
+  leaveBalanceLogs: {
+    findMany: (): LeaveBalanceAuditLog[] => {
+      const dbData = getDbFileContent();
+      return dbData.leaveBalanceLogs || [];
+    },
+    create: (data: Omit<LeaveBalanceAuditLog, 'id' | 'createdAt'>): LeaveBalanceAuditLog => {
+      const dbData = getDbFileContent();
+      if (!dbData.leaveBalanceLogs) dbData.leaveBalanceLogs = [];
+      const newLog: LeaveBalanceAuditLog = {
+        id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        createdAt: new Date().toISOString(),
+        ...data
+      };
+      dbData.leaveBalanceLogs.push(newLog);
+      saveDb(dbData);
+      return newLog;
     }
   },
 

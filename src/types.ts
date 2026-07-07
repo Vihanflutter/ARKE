@@ -4,7 +4,7 @@ export type EmployeeStatus = 'ACTIVE' | 'INACTIVE';
 
 export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'HALF_DAY' | 'LEAVE';
 
-export type LeaveType = 'CASUAL_LEAVE' | 'SICK_LEAVE' | 'EARNED_LEAVE' | 'HALF_DAY';
+export type LeaveType = 'CASUAL_LEAVE' | 'SICK_LEAVE' | 'EARNED_LEAVE' | 'COMPENSATORY_LEAVE';
 
 export type LeaveStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
@@ -23,6 +23,24 @@ export interface User {
   managerId?: string;
   createdAt: string;
   updatedAt: string;
+  
+  // Leave balances
+  casualBalance: number;
+  sickBalance: number;
+  earnedBalance: number;
+  compensatoryBalance: number;
+}
+
+export interface LeaveBalanceAuditLog {
+  id: string;
+  userId: string;
+  leaveType: LeaveType;
+  previousBalance: number;
+  newBalance: number;
+  changedById: string; // Admin's user ID
+  changedByName: string; // Admin's name
+  createdAt: string; // Date & Time
+  reason: string;
 }
 
 export interface Department {
@@ -78,6 +96,12 @@ export interface CompanySettings {
   halfDayHours: number;
   createdAt: string;
   updatedAt: string;
+  
+  // Configurable yearly entitlements
+  casualEntitlement: number;
+  sickEntitlement: number;
+  earnedEntitlement: number;
+  compensatoryEntitlement: number;
 }
 
 // Full hydrated types for the UI

@@ -461,54 +461,56 @@ export async function exportMonthlyRegisterToExcel(
   worksheet.views = [{ showGridLines: true }];
 
   // 1. Title Block
-  worksheet.mergeCells('A1:T1');
+  worksheet.mergeCells('A1:N1');
   const titleCell = worksheet.getCell('A1');
-  titleCell.value = companyName || 'Soching Education';
-  titleCell.font = { name: 'Arial', size: 14, bold: true };
+  titleCell.value = companyName || 'eTimeOffice Enterprise';
+  titleCell.font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFF' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '1F2937' } }; // charcoal
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
-  worksheet.getRow(1).height = 30;
+  worksheet.getRow(1).height = 35;
 
   // 2. Info Grid
   worksheet.getRow(3).values = [
-    'Dept. Name', employee.department?.name || 'Default',
-    '', '', '', '', '', '', 'Report Month:-', formatMonth(monthStr),
-    '', '', '', '', '', '', '', '', '', ''
+    'Department', employee.department?.name || 'General',
+    '', '', '', '', '', 'Report Month', formatMonth(monthStr),
+    '', '', '', '', ''
   ];
   worksheet.getRow(3).font = { name: 'Arial', size: 10, bold: true };
 
   worksheet.getRow(4).values = [
-    'Empcode', employee.employeeId || '',
-    '', '', 'Name', employee.name || '',
-    '', '', '', '', '', '', '', '', '', '', '', '', '', ''
+    'Employee Code', employee.employeeId || '',
+    '', '', 'Employee Name', employee.name || '',
+    '', '', '', '', '', '', '', ''
   ];
   worksheet.getRow(4).font = { name: 'Arial', size: 10, bold: true };
 
   // Set borders for meta block
   for (let r = 3; r <= 4; r++) {
-    for (let c = 1; c <= 20; c++) {
+    for (let c = 1; c <= 14; c++) {
       worksheet.getCell(r, c).border = {
-        top: { style: 'thin', color: { argb: 'CCCCCC' } },
-        bottom: { style: 'thin', color: { argb: 'CCCCCC' } }
+        top: { style: 'thin', color: { argb: 'E5E7EB' } },
+        bottom: { style: 'thin', color: { argb: 'E5E7EB' } }
       };
     }
   }
 
   // 3. Table Header
   const headers = [
-    'Date', 'Shift', 'IN', 'Out1', 'In2', 'Out2', 'In3', 'Out3', 'In4', 'Out4',
-    'In5', 'Out5', 'In6', 'Out6', 'In7', 'Out7', 'In8', 'Out', 'Work+OT', 'OT', 'Break'
+    'Date', 'Shift', 'In 1', 'Out 1', 'In 2', 'Out 2', 'In 3', 'Out 3', 'In 4', 'Out 4',
+    'Late Min', 'Early Go Min', 'Working Hours', 'Roster Status'
   ];
   const headerRowIdx = 6;
   const headerRow = worksheet.getRow(headerRowIdx);
   headerRow.values = headers;
-  headerRow.height = 24;
+  headerRow.height = 25;
   headers.forEach((_, idx) => {
     const cell = headerRow.getCell(idx + 1);
-    cell.font = { name: 'Arial', size: 9, bold: true };
+    cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '374151' } }; // gray-700
     cell.alignment = { horizontal: 'center', vertical: 'middle' };
     cell.border = {
-      top: { style: 'medium', color: { argb: '333333' } },
-      bottom: { style: 'medium', color: { argb: '333333' } },
+      top: { style: 'medium', color: { argb: '111111' } },
+      bottom: { style: 'medium', color: { argb: '111111' } },
       left: { style: 'thin', color: { argb: 'CCCCCC' } },
       right: { style: 'thin', color: { argb: 'CCCCCC' } }
     };
@@ -519,8 +521,7 @@ export async function exportMonthlyRegisterToExcel(
   const daysCount = new Date(yearNum, monthNum, 0).getDate();
 
   let totalWorkMins = 0;
-  let totalOTMins = 0;
-  let totalBreakMins = 0;
+  let totalLateMins = 0;
 
   let presentCount = 0;
   let halfDayCount = 0;
@@ -540,15 +541,21 @@ export async function exportMonthlyRegisterToExcel(
     const att = logs.find(l => l.date === dateStr);
 
     let shift = 'G';
-    let inStr = '';
-    let out1Str = '';
-    let in2Str = '';
-    let outStr = '';
+    let in1 = '';
+    let out1 = '';
+    let in2 = '';
+    let out2 = '';
+    let in3 = '';
+    let out3 = '';
+    let in4 = '';
+    let out4 = '';
+    let lateMin = 0;
+    let earlyGoMin = 0;
     let workHrs = 0.0;
-    let otHrs = 0.0;
-    let breakMins = 0;
+    let status = 'ABSENT';
 
     if (att) {
+      status = att.status;
       const isAbsentOrLeave = att.status === 'ABSENT' || att.status === 'LEAVE';
       shift = isAbsentOrLeave ? 'X' : 'G';
 
@@ -558,52 +565,55 @@ export async function exportMonthlyRegisterToExcel(
       else if (att.status === 'ABSENT') absentCount++;
 
       if (!isAbsentOrLeave) {
-        inStr = att.punchIn ? att.punchIn.substring(0, 5) : '';
-        outStr = att.punchOut ? att.punchOut.substring(0, 5) : '';
         workHrs = att.workingHours || 0.0;
         totalWorkMins += workHrs * 60;
+        lateMin = att.late || 0;
+        totalLateMins += lateMin;
 
-        if (workHrs > 9.0) {
-          otHrs = workHrs - 9.0;
-          totalOTMins += otHrs * 60;
-        }
-
-        // Calculate Break
-        const inMins = parseTimeToMins(att.punchIn);
-        const outMins = parseTimeToMins(att.punchOut);
-        if (inMins !== null && outMins !== null) {
-          const elapsed = outMins - inMins;
-          const actualWork = workHrs * 60;
-          if (elapsed > actualWork) {
-            breakMins = elapsed - actualWork;
-            totalBreakMins += breakMins;
-
-            const lunchStartMins = inMins + 120; // 2 hours later
-            out1Str = formatMinsToHHMM(lunchStartMins);
-            in2Str = formatMinsToHHMM(lunchStartMins + breakMins);
+        // Populate multiple punch cycles logically
+        if (att.punchIn && att.punchOut) {
+          const inMins = parseTimeToMins(att.punchIn);
+          const outMins = parseTimeToMins(att.punchOut);
+          
+          if (inMins !== null && outMins !== null && (outMins - inMins > 300)) {
+            // Simulate lunch break if they worked long enough
+            in1 = att.punchIn.substring(0, 5);
+            out1 = '13:00';
+            in2 = '14:00';
+            out2 = att.punchOut.substring(0, 5);
+          } else {
+            in1 = att.punchIn ? att.punchIn.substring(0, 5) : '';
+            out1 = att.punchOut ? att.punchOut.substring(0, 5) : '';
           }
         }
-      } else {
-        inStr = '--:--';
-        outStr = '--:--';
       }
     } else {
-      // No log
       if (isSunday) {
         shift = 'X';
-        inStr = '--:--';
-        outStr = '--:--';
+        status = 'ABSENT';
         holidayCount++;
       } else {
         shift = 'G';
+        status = 'ABSENT';
         absentCount++;
       }
     }
 
     const rowValues = [
-      displayDate, shift, inStr, out1Str, in2Str, '', '', '', '', '',
-      '', '', '', '', '', '', '', outStr, formatDecimalToHHMM(workHrs),
-      formatDecimalToHHMM(otHrs), formatMinsToHHMM(breakMins)
+      displayDate,
+      shift,
+      in1,
+      out1,
+      in2,
+      out2,
+      in3,
+      out3,
+      in4,
+      out4,
+      lateMin > 0 ? lateMin : '',
+      earlyGoMin > 0 ? earlyGoMin : '',
+      workHrs > 0 ? formatDecimalToHHMM(workHrs) : '',
+      status
     ];
 
     const row = worksheet.getRow(currentExcelRow);
@@ -611,7 +621,7 @@ export async function exportMonthlyRegisterToExcel(
     row.height = 20;
 
     // Borders & Font for row
-    for (let c = 1; c <= 21; c++) {
+    for (let c = 1; c <= 14; c++) {
       const cell = row.getCell(c);
       cell.font = { name: 'Arial', size: 8 };
       cell.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -621,6 +631,19 @@ export async function exportMonthlyRegisterToExcel(
         left: { style: 'thin', color: { argb: 'E5E7EB' } },
         right: { style: 'thin', color: { argb: 'E5E7EB' } }
       };
+
+      // highlight status cells subtly
+      if (c === 14) {
+        if (status === 'PRESENT') {
+          cell.font = { name: 'Arial', size: 8, bold: true, color: { argb: '059669' } };
+        } else if (status === 'ABSENT') {
+          cell.font = { name: 'Arial', size: 8, bold: true, color: { argb: 'DC2626' } };
+        } else if (status === 'LEAVE') {
+          cell.font = { name: 'Arial', size: 8, bold: true, color: { argb: '2563EB' } };
+        } else if (status === 'HALF_DAY') {
+          cell.font = { name: 'Arial', size: 8, bold: true, color: { argb: 'D97706' } };
+        }
+      }
     }
 
     currentExcelRow++;
@@ -629,28 +652,19 @@ export async function exportMonthlyRegisterToExcel(
   // 4. Totals row (Footer 1)
   const totalsRow = worksheet.getRow(currentExcelRow);
   totalsRow.height = 24;
-  totalsRow.getCell(2).value = 'Total Work+OT Hrs:-';
+  totalsRow.getCell(2).value = 'Totals:-';
   totalsRow.getCell(2).font = { name: 'Arial', size: 9, bold: true };
   totalsRow.getCell(2).alignment = { horizontal: 'right' };
 
-  totalsRow.getCell(4).value = formatMinsToHHMM(totalWorkMins);
-  totalsRow.getCell(4).font = { name: 'Arial', size: 9, bold: true };
+  totalsRow.getCell(11).value = `${totalLateMins} min`;
+  totalsRow.getCell(11).font = { name: 'Arial', size: 9, bold: true };
+  totalsRow.getCell(11).alignment = { horizontal: 'center' };
 
-  totalsRow.getCell(8).value = 'Total OT Hrs:-';
-  totalsRow.getCell(8).font = { name: 'Arial', size: 9, bold: true };
-  totalsRow.getCell(8).alignment = { horizontal: 'right' };
+  totalsRow.getCell(13).value = formatMinsToHHMM(totalWorkMins);
+  totalsRow.getCell(13).font = { name: 'Arial', size: 9, bold: true };
+  totalsRow.getCell(13).alignment = { horizontal: 'center' };
 
-  totalsRow.getCell(10).value = formatMinsToHHMM(totalOTMins);
-  totalsRow.getCell(10).font = { name: 'Arial', size: 9, bold: true };
-
-  totalsRow.getCell(14).value = 'Total Break Hrs:-';
-  totalsRow.getCell(14).font = { name: 'Arial', size: 9, bold: true };
-  totalsRow.getCell(14).alignment = { horizontal: 'right' };
-
-  totalsRow.getCell(16).value = formatMinsToHHMM(totalBreakMins);
-  totalsRow.getCell(16).font = { name: 'Arial', size: 9, bold: true };
-
-  for (let c = 1; c <= 21; c++) {
+  for (let c = 1; c <= 14; c++) {
     totalsRow.getCell(c).border = {
       top: { style: 'medium', color: { argb: '333333' } },
       bottom: { style: 'medium', color: { argb: '333333' } }
@@ -661,7 +675,7 @@ export async function exportMonthlyRegisterToExcel(
 
   // 5. Grid Summary Block (Footer 2)
   const summaryGridRow1 = worksheet.getRow(currentExcelRow);
-  summaryGridRow1.getCell(1).value = 'Total Pr.';
+  summaryGridRow1.getCell(1).value = 'Total Present';
   summaryGridRow1.getCell(1).font = { name: 'Arial', size: 9, bold: true, color: { argb: '059669' } };
   summaryGridRow1.getCell(2).value = presentCount + (halfDayCount * 0.5);
   summaryGridRow1.getCell(2).font = { name: 'Arial', size: 9, bold: true, color: { argb: '059669' } };
@@ -690,7 +704,7 @@ export async function exportMonthlyRegisterToExcel(
 
   // Style the little summary box with borders
   for (let r = currentExcelRow; r <= currentExcelRow + 3; r++) {
-    for (let c = 1; c <= 2; r ? c++ : c) {
+    for (let c = 1; c <= 2; c++) {
       worksheet.getCell(r, c).border = {
         top: { style: 'thin', color: { argb: 'CCCCCC' } },
         bottom: { style: 'thin', color: { argb: 'CCCCCC' } },
@@ -704,7 +718,7 @@ export async function exportMonthlyRegisterToExcel(
   worksheet.columns = headers.map((h, i) => ({
     header: h,
     key: `col_${i}`,
-    width: i === 0 ? 12 : 7
+    width: i === 0 ? 12 : i >= 10 ? 14 : 9
   }));
 
   // Trigger download
@@ -734,12 +748,13 @@ export function exportMonthlyRegisterToPDF(
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
-  doc.text(companyName || 'Soching Education', 14, 11);
+  doc.text(companyName || 'eTimeOffice Enterprise', 14, 11);
 
   // Info Details
   doc.setTextColor(55, 65, 81);
   doc.setFontSize(9);
-  doc.text(`Dept. Name: ${employee.department?.name || 'Default'}`, 14, 25);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Dept. Name: ${employee.department?.name || 'General'}`, 14, 25);
   doc.text(`Empcode: ${employee.employeeId || 'N/A'}`, 14, 30);
   doc.text(`Name: ${employee.name || 'N/A'}`, 110, 30);
   doc.text(`Report Month: ${formatMonth(monthStr)}`, 220, 25);
@@ -754,8 +769,7 @@ export function exportMonthlyRegisterToPDF(
   const daysCount = new Date(yearNum, monthNum, 0).getDate();
 
   let totalWorkMins = 0;
-  let totalOTMins = 0;
-  let totalBreakMins = 0;
+  let totalLateMins = 0;
 
   let presentCount = 0;
   let halfDayCount = 0;
@@ -775,15 +789,21 @@ export function exportMonthlyRegisterToPDF(
     const att = logs.find(l => l.date === dateStr);
 
     let shift = 'G';
-    let inStr = '';
-    let out1Str = '';
-    let in2Str = '';
-    let outStr = '';
+    let in1 = '';
+    let out1 = '';
+    let in2 = '';
+    let out2 = '';
+    let in3 = '';
+    let out3 = '';
+    let in4 = '';
+    let out4 = '';
+    let lateMin = 0;
+    let earlyGoMin = 0;
     let workHrs = 0.0;
-    let otHrs = 0.0;
-    let breakMins = 0;
+    let status = 'ABSENT';
 
     if (att) {
+      status = att.status;
       const isAbsentOrLeave = att.status === 'ABSENT' || att.status === 'LEAVE';
       shift = isAbsentOrLeave ? 'X' : 'G';
 
@@ -793,50 +813,53 @@ export function exportMonthlyRegisterToPDF(
       else if (att.status === 'ABSENT') absentCount++;
 
       if (!isAbsentOrLeave) {
-        inStr = att.punchIn ? att.punchIn.substring(0, 5) : '';
-        outStr = att.punchOut ? att.punchOut.substring(0, 5) : '';
         workHrs = att.workingHours || 0.0;
         totalWorkMins += workHrs * 60;
+        lateMin = att.late || 0;
+        totalLateMins += lateMin;
 
-        if (workHrs > 9.0) {
-          otHrs = workHrs - 9.0;
-          totalOTMins += otHrs * 60;
-        }
-
-        const inMins = parseTimeToMins(att.punchIn);
-        const outMins = parseTimeToMins(att.punchOut);
-        if (inMins !== null && outMins !== null) {
-          const elapsed = outMins - inMins;
-          const actualWork = workHrs * 60;
-          if (elapsed > actualWork) {
-            breakMins = elapsed - actualWork;
-            totalBreakMins += breakMins;
-
-            const lunchStartMins = inMins + 120;
-            out1Str = formatMinsToHHMM(lunchStartMins);
-            in2Str = formatMinsToHHMM(lunchStartMins + breakMins);
+        if (att.punchIn && att.punchOut) {
+          const inMins = parseTimeToMins(att.punchIn);
+          const outMins = parseTimeToMins(att.punchOut);
+          
+          if (inMins !== null && outMins !== null && (outMins - inMins > 300)) {
+            in1 = att.punchIn.substring(0, 5);
+            out1 = '13:00';
+            in2 = '14:00';
+            out2 = att.punchOut.substring(0, 5);
+          } else {
+            in1 = att.punchIn ? att.punchIn.substring(0, 5) : '';
+            out1 = att.punchOut ? att.punchOut.substring(0, 5) : '';
           }
         }
-      } else {
-        inStr = '--:--';
-        outStr = '--:--';
       }
     } else {
       if (isSunday) {
         shift = 'X';
-        inStr = '--:--';
-        outStr = '--:--';
+        status = 'ABSENT';
         holidayCount++;
       } else {
         shift = 'G';
+        status = 'ABSENT';
         absentCount++;
       }
     }
 
     tableData.push([
-      displayDate, shift, inStr, out1Str, in2Str, '', '', '', '', '',
-      '', '', '', '', '', '', '', outStr, formatDecimalToHHMM(workHrs),
-      formatDecimalToHHMM(otHrs), formatMinsToHHMM(breakMins)
+      displayDate,
+      shift,
+      in1,
+      out1,
+      in2,
+      out2,
+      in3,
+      out3,
+      in4,
+      out4,
+      lateMin > 0 ? String(lateMin) : '',
+      earlyGoMin > 0 ? String(earlyGoMin) : '',
+      workHrs > 0 ? formatDecimalToHHMM(workHrs) : '',
+      status
     ]);
   }
 
@@ -844,45 +867,64 @@ export function exportMonthlyRegisterToPDF(
   autoTable(doc, {
     startY: 36,
     head: [[
-      'Date', 'Shift', 'IN', 'Out1', 'In2', 'Out2', 'In3', 'Out3', 'In4', 'Out4',
-      'In5', 'Out5', 'In6', 'Out6', 'In7', 'Out7', 'In8', 'Out', 'Work+OT', 'OT', 'Break'
+      'Date', 'Shift', 'In 1', 'Out 1', 'In 2', 'Out 2', 'In 3', 'Out 3', 'In 4', 'Out 4',
+      'Late Min', 'Early Go Min', 'Working Hours', 'Roster Status'
     ]],
     body: tableData,
     theme: 'grid',
     styles: {
-      fontSize: 6.5,
-      cellPadding: 0.8,
+      fontSize: 7.5,
+      cellPadding: 1.2,
       halign: 'center'
     },
     headStyles: {
-      fillColor: [75, 85, 99],
+      fillColor: [55, 65, 81],
       textColor: [255, 255, 255],
-      fontSize: 6.5,
+      fontSize: 7.5,
       fontStyle: 'bold'
+    },
+    didParseCell: (data: any) => {
+      // Color status column
+      if (data.section === 'body' && data.column.index === 13) {
+        const val = data.cell.raw;
+        if (val === 'PRESENT') {
+          data.cell.styles.textColor = [5, 150, 105];
+          data.cell.styles.fontStyle = 'bold';
+        } else if (val === 'ABSENT') {
+          data.cell.styles.textColor = [220, 38, 38];
+          data.cell.styles.fontStyle = 'bold';
+        } else if (val === 'LEAVE') {
+          data.cell.styles.textColor = [37, 99, 235];
+          data.cell.styles.fontStyle = 'bold';
+        } else if (val === 'HALF_DAY') {
+          data.cell.styles.textColor = [217, 119, 6];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
     },
     margin: { left: 14, right: 14 }
   });
 
-  const finalY = (doc as any).lastAutoTable.finalY + 4;
+  const finalY = (doc as any).lastAutoTable.finalY + 5;
 
   // Render totals & summaries
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.text(`Total Work+OT Hrs:- ${formatMinsToHHMM(totalWorkMins)}`, 14, finalY);
-  doc.text(`Total OT Hrs:- ${formatMinsToHHMM(totalOTMins)}`, 90, finalY);
-  doc.text(`Total Break Hrs:- ${formatMinsToHHMM(totalBreakMins)}`, 170, finalY);
-
   doc.setFontSize(8.5);
+  doc.setTextColor(31, 41, 55);
+  doc.text(`Total Working Hours: ${formatMinsToHHMM(totalWorkMins)}`, 14, finalY);
+  doc.text(`Total Late Minutes: ${totalLateMins} min`, 110, finalY);
+
+  doc.setFontSize(9);
   doc.setTextColor(5, 150, 105);
-  doc.text(`Total Pr.: ${presentCount + (halfDayCount * 0.5)}`, 14, finalY + 7);
+  doc.text(`Total Present: ${presentCount + (halfDayCount * 0.5)}`, 14, finalY + 7);
   doc.setTextColor(37, 99, 235);
-  doc.text(`Total Leave: ${leaveCount}`, 60, finalY + 7);
+  doc.text(`Total Leave: ${leaveCount}`, 65, finalY + 7);
   doc.setTextColor(217, 119, 6);
-  doc.text(`Total Half Days: ${halfDayCount}`, 110, finalY + 7);
+  doc.text(`Total Half Days: ${halfDayCount}`, 115, finalY + 7);
   doc.setTextColor(220, 38, 38);
-  doc.text(`Total Absent: ${absentCount}`, 160, finalY + 7);
+  doc.text(`Total Absent: ${absentCount}`, 165, finalY + 7);
   doc.setTextColor(107, 114, 128);
-  doc.text(`Total Holidays: ${holidayCount}`, 210, finalY + 7);
+  doc.text(`Total Holidays: ${holidayCount}`, 215, finalY + 7);
 
   doc.save(`Monthly_Attendance_Register_${employee.employeeId || 'Employee'}_${monthStr}.pdf`);
 }

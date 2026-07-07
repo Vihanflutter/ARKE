@@ -22,7 +22,7 @@ interface AdminDashboardProps {
 }
 
 export default function AdminDashboard({ currentUser, onLogout }: AdminDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'employees' | 'attendance' | 'leaves' | 'reports' | 'settings' | 'departments'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'employees' | 'attendance' | 'leaves' | 'leave-balances' | 'reports' | 'settings' | 'departments'>('overview');
   
   // Database States
   const [employees, setEmployees] = useState<HydratedUser[]>([]);
@@ -65,6 +65,13 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
   const [manualPunchIn, setManualPunchIn] = useState<string>('09:00');
   const [manualPunchOut, setManualPunchOut] = useState<string>('18:00');
   const [leaveRemarksModal, setLeaveRemarksModal] = useState<{ open: boolean; leave?: HydratedLeaveRequest; action?: 'approve' | 'reject' }>({ open: false });
+
+  // Leave Balance Management States
+  const [balanceLogs, setBalanceLogs] = useState<any[]>([]);
+  const [viewBalanceSubTab, setViewBalanceSubTab] = useState<'ledger' | 'history'>('ledger');
+  const [adjustBalanceModal, setAdjustBalanceModal] = useState<{ open: boolean; userId?: string; employeeName?: string }>({ open: false });
+  const [bulkBalanceModal, setBulkBalanceModal] = useState(false);
+  const [selectedEmpIds, setSelectedEmpIds] = useState<string[]>([]);
 
   // Confirmation Modal State
   const [confirmModal, setConfirmModal] = useState<{
@@ -134,6 +141,9 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
 
       const settingsRes = await apiRequest<CompanySettings>('/api/settings');
       setSettings(settingsRes);
+
+      const logsRes = await apiRequest<any[]>('/api/leaves/balance-history');
+      setBalanceLogs(logsRes);
     } catch (err: any) {
       showMsg('error', err.message || 'Failed to load system datasets');
     } finally {
@@ -198,6 +208,10 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
 
     if (!isEdit) {
       empData.password = formData.get('password') || 'employee123';
+      empData.casualBalance = formData.get('casualBalance') !== null ? Number(formData.get('casualBalance')) : undefined;
+      empData.sickBalance = formData.get('sickBalance') !== null ? Number(formData.get('sickBalance')) : undefined;
+      empData.earnedBalance = formData.get('earnedBalance') !== null ? Number(formData.get('earnedBalance')) : undefined;
+      empData.compensatoryBalance = formData.get('compensatoryBalance') !== null ? Number(formData.get('compensatoryBalance')) : undefined;
     }
 
     let finalDeptId = empData.departmentId;
@@ -427,6 +441,10 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
       officeEndTime: formData.get('officeEndTime') as string,
       graceTimeMinutes: parseInt(formData.get('graceTimeMinutes') as string) || 0,
       halfDayHours: parseFloat(formData.get('halfDayHours') as string) || 4.0,
+      casualEntitlement: parseInt(formData.get('casualEntitlement') as string) ?? 12,
+      sickEntitlement: parseInt(formData.get('sickEntitlement') as string) ?? 10,
+      earnedEntitlement: parseInt(formData.get('earnedEntitlement') as string) ?? 15,
+      compensatoryEntitlement: parseInt(formData.get('compensatoryEntitlement') as string) ?? 0,
     };
 
     try {
@@ -438,6 +456,87 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
     } finally {
       setOperationLoading(false);
     }
+  };
+
+  // --- LEAVE BALANCES HANDLERS ---
+  const handleSingleBalanceAdjustment = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setOperationLoading(true);
+    const formData = new FormData(e.currentTarget);
+    const userId = adjustBalanceModal.userId;
+    const body = {
+      leaveType: formData.get('leaveType') as string,
+      action: formData.get('action') as string,
+      amount: Number(formData.get('amount') || 0),
+      reason: formData.get('reason') as string,
+      changedById: currentUser.id,
+      changedByName: currentUser.name,
+    };
+
+    try {
+      await apiRequest(`/api/employees/${userId}/leave-balance`, 'POST', body);
+      showMsg('success', 'Leave balance updated successfully.');
+      setAdjustBalanceModal({ open: false });
+      loadAllData();
+    } catch (err: any) {
+      showMsg('error', err.message || 'Failed to update leave balance');
+    } finally {
+      setOperationLoading(false);
+    }
+  };
+
+  const handleBulkBalanceAdjustment = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (selectedEmpIds.length === 0) {
+      showMsg('error', 'Please select at least one employee from the list.');
+      return;
+    }
+    setOperationLoading(true);
+    const formData = new FormData(e.currentTarget);
+    const body = {
+      userIds: selectedEmpIds,
+      leaveType: formData.get('leaveType') as string,
+      action: formData.get('action') as string,
+      amount: Number(formData.get('amount') || 0),
+      reason: formData.get('reason') as string,
+      changedById: currentUser.id,
+      changedByName: currentUser.name,
+    };
+
+    try {
+      await apiRequest('/api/employees/bulk-leave-balance', 'POST', body);
+      showMsg('success', `Bulk leave balance update completed for ${selectedEmpIds.length} employees.`);
+      setBulkBalanceModal(false);
+      setSelectedEmpIds([]);
+      loadAllData();
+    } catch (err: any) {
+      showMsg('error', err.message || 'Bulk adjustment failed');
+    } finally {
+      setOperationLoading(false);
+    }
+  };
+
+  const handleResetBalances = async () => {
+    triggerConfirm(
+      'Reset All Leave Balances',
+      'This will reset leave balances for all active non-admin employees to their configured default entitlements. This action is irreversible. Proceed?',
+      async () => {
+        setOperationLoading(true);
+        try {
+          await apiRequest('/api/employees/reset-leave-balances', 'POST', {
+            changedById: currentUser.id,
+            changedByName: currentUser.name,
+            reason: 'Yearly/Manual Organization reset'
+          });
+          showMsg('success', 'All active employee leave balances have been reset.');
+          loadAllData();
+        } catch (err: any) {
+          showMsg('error', err.message || 'Reset failed');
+        } finally {
+          setOperationLoading(false);
+        }
+      }
+    );
   };
 
   // Reset database helper
@@ -709,6 +808,15 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                   {leaves.filter(l => l.status === 'PENDING').length}
                 </span>
               )}
+            </button>
+            <button
+              onClick={() => setActiveTab('leave-balances')}
+              className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium flex items-center gap-2.5 transition cursor-pointer ${
+                activeTab === 'leave-balances' ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <CalendarClock className="w-4 h-4 text-slate-500" />
+              Leave Balances
             </button>
             <button
               onClick={() => setActiveTab('reports')}
@@ -1327,6 +1435,223 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                   </div>
                 )}
 
+                {/* --- LEAVE BALANCES TAB --- */}
+                {activeTab === 'leave-balances' && (
+                  <div className="space-y-6">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                      <div>
+                        <h2 className="text-xl font-bold text-slate-900 font-sans">Organization Leave Balances</h2>
+                        <p className="text-xs text-slate-500 mt-1">Configure, audit, and bulk manage available leave types for active staff</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleResetBalances}
+                          className="bg-white border border-red-200 text-red-600 hover:bg-red-50 font-semibold text-xs px-3.5 py-2 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" /> Reset All Yearly Balances
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Sub tabs */}
+                    <div className="flex border-b border-slate-200 gap-1 pb-1">
+                      <button
+                        type="button"
+                        onClick={() => setViewBalanceSubTab('ledger')}
+                        className={`py-2 px-4 border-b-2 font-medium text-xs transition-all cursor-pointer ${
+                          viewBalanceSubTab === 'ledger'
+                            ? 'border-slate-900 text-slate-900 font-semibold'
+                            : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
+                        }`}
+                      >
+                        Employee Balances Ledger
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setViewBalanceSubTab('history')}
+                        className={`py-2 px-4 border-b-2 font-medium text-xs transition-all cursor-pointer ${
+                          viewBalanceSubTab === 'history'
+                            ? 'border-slate-900 text-slate-900 font-semibold'
+                            : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
+                        }`}
+                      >
+                        Balance Adjustment History ({balanceLogs.length})
+                      </button>
+                    </div>
+
+                    {viewBalanceSubTab === 'ledger' ? (
+                      <div className="space-y-4">
+                        {/* Filters & Bulk Buttons */}
+                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row justify-between gap-4">
+                          <div className="relative max-w-xs w-full">
+                            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                            <input
+                              type="text"
+                              placeholder="Search employees..."
+                              value={empSearch}
+                              onChange={(e) => setEmpSearch(e.target.value)}
+                              className="w-full border border-slate-200 rounded-lg pl-9 pr-3 py-1.5 text-xs outline-none focus:border-slate-900 bg-white"
+                            />
+                          </div>
+
+                          {selectedEmpIds.length > 0 && (
+                            <button
+                              onClick={() => setBulkBalanceModal(true)}
+                              className="bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs px-4 py-2 rounded-lg shadow transition-all flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Edit className="w-3.5 h-3.5" /> Bulk Update Selected ({selectedEmpIds.length})
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Balance Table */}
+                        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                              <thead className="bg-slate-50 text-slate-500 text-[10px] font-bold uppercase tracking-wider border-b border-slate-200">
+                                <tr>
+                                  <th className="px-5 py-3 text-center w-12">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedEmpIds.length === employees.filter(e => e.role !== 'ADMIN').length && employees.filter(e => e.role !== 'ADMIN').length > 0}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setSelectedEmpIds(employees.filter(emp => emp.role !== 'ADMIN').map(emp => emp.id));
+                                        } else {
+                                          setSelectedEmpIds([]);
+                                        }
+                                      }}
+                                      className="rounded border-slate-300 focus:ring-slate-900 text-slate-900"
+                                    />
+                                  </th>
+                                  <th className="px-5 py-3">Employee</th>
+                                  <th className="px-5 py-3 text-center">Casual Leave (CL)</th>
+                                  <th className="px-5 py-3 text-center">Sick Leave (SL)</th>
+                                  <th className="px-5 py-3 text-center">Earned Leave (EL)</th>
+                                  <th className="px-5 py-3 text-center">Compensatory Leave (CO)</th>
+                                  <th className="px-5 py-3 text-right">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-200">
+                                {employees
+                                  .filter(e => e.role !== 'ADMIN' && e.name.toLowerCase().includes(empSearch.toLowerCase()))
+                                  .length === 0 ? (
+                                  <tr>
+                                    <td colSpan={7} className="px-5 py-8 text-center text-slate-400 text-xs font-medium">
+                                      No active employees found.
+                                    </td>
+                                  </tr>
+                                ) : (
+                                  employees
+                                    .filter(e => e.role !== 'ADMIN' && e.name.toLowerCase().includes(empSearch.toLowerCase()))
+                                    .map((emp) => (
+                                      <tr key={emp.id} className="hover:bg-slate-50/50 transition-colors">
+                                        <td className="px-5 py-3.5 text-center">
+                                          <input
+                                            type="checkbox"
+                                            checked={selectedEmpIds.includes(emp.id)}
+                                            onChange={(e) => {
+                                              if (e.target.checked) {
+                                                setSelectedEmpIds(prev => [...prev, emp.id]);
+                                              } else {
+                                                setSelectedEmpIds(prev => prev.filter(id => id !== emp.id));
+                                              }
+                                            }}
+                                            className="rounded border-slate-300 focus:ring-slate-900 text-slate-900"
+                                          />
+                                        </td>
+                                        <td className="px-5 py-3.5">
+                                          <div className="font-bold text-slate-900">{emp.name}</div>
+                                          <div className="text-xs text-slate-400 font-mono mt-0.5">{emp.employeeId} &bull; {emp.department?.name || 'No Dept'}</div>
+                                        </td>
+                                        <td className="px-5 py-3.5 text-center font-semibold text-slate-700">{emp.casualBalance ?? 0} days</td>
+                                        <td className="px-5 py-3.5 text-center font-semibold text-slate-700">{emp.sickBalance ?? 0} days</td>
+                                        <td className="px-5 py-3.5 text-center font-semibold text-slate-700">{emp.earnedBalance ?? 0} days</td>
+                                        <td className="px-5 py-3.5 text-center font-semibold text-slate-700">{emp.compensatoryBalance ?? 0} days</td>
+                                        <td className="px-5 py-3.5 text-right">
+                                          <button
+                                            onClick={() => setAdjustBalanceModal({ open: true, userId: emp.id, employeeName: emp.name })}
+                                            className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-semibold text-xs px-2.5 py-1.5 rounded-md transition-colors cursor-pointer inline-flex items-center gap-1"
+                                          >
+                                            <Edit className="w-3.5 h-3.5 text-slate-400" /> Manual Adjust
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      /* History Table */
+                      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm text-left">
+                            <thead className="bg-slate-50 text-slate-500 text-[10px] font-bold uppercase tracking-wider border-b border-slate-200">
+                              <tr>
+                                <th className="px-5 py-3">Employee</th>
+                                <th className="px-5 py-3">Leave Type</th>
+                                <th className="px-5 py-3 text-center">Previous</th>
+                                <th className="px-5 py-3 text-center">New Balance</th>
+                                <th className="px-5 py-3 text-center">Change</th>
+                                <th className="px-5 py-3">Changed By</th>
+                                <th className="px-5 py-3">Reason</th>
+                                <th className="px-5 py-3 text-right">Timestamp</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200">
+                              {balanceLogs.length === 0 ? (
+                                <tr>
+                                  <td colSpan={8} className="px-5 py-8 text-center text-slate-400 text-xs font-medium">
+                                    No manual balance adjustment records logged.
+                                  </td>
+                                </tr>
+                              ) : (
+                                balanceLogs.map((log) => {
+                                  const diff = log.newBalance - log.previousBalance;
+                                  return (
+                                    <tr key={log.id} className="hover:bg-slate-50/50 transition-colors">
+                                      <td className="px-5 py-3.5">
+                                        <div className="font-bold text-slate-900">{log.employeeName}</div>
+                                        <div className="text-xs text-slate-400 font-mono">{log.employeeId}</div>
+                                      </td>
+                                      <td className="px-5 py-3.5">
+                                        <span className="text-xs bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-bold uppercase tracking-wide border border-slate-200">
+                                          {log.leaveType.replace('_', ' ')}
+                                        </span>
+                                      </td>
+                                      <td className="px-5 py-3.5 text-center font-medium text-slate-500">{log.previousBalance}</td>
+                                      <td className="px-5 py-3.5 text-center font-bold text-slate-900">{log.newBalance}</td>
+                                      <td className="px-5 py-3.5 text-center">
+                                        {diff > 0 ? (
+                                          <span className="text-green-600 font-bold">+{diff}</span>
+                                        ) : diff < 0 ? (
+                                          <span className="text-red-600 font-bold">{diff}</span>
+                                        ) : (
+                                          <span className="text-slate-400 font-medium">No Change</span>
+                                        )}
+                                      </td>
+                                      <td className="px-5 py-3.5 text-xs text-slate-700">{log.changedByName}</td>
+                                      <td className="px-5 py-3.5 text-xs text-slate-600 max-w-[200px] truncate" title={log.reason}>
+                                        {log.reason}
+                                      </td>
+                                      <td className="px-5 py-3.5 text-right font-mono text-[11px] text-slate-400">
+                                        {new Date(log.createdAt).toLocaleString()}
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* --- REPORTS GENERATION TAB --- */}
                 {activeTab === 'reports' && (
                   <div className="space-y-6">
@@ -1593,6 +1918,52 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                                 defaultValue={settings.halfDayHours}
                                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-slate-900 bg-white"
                               />
+                            </div>
+                          </div>
+
+                          <div className="border-t border-slate-100 pt-4 space-y-3">
+                            <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Default Yearly Leave Entitlements</h4>
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Casual Leave (CL)</label>
+                                <input
+                                  type="number"
+                                  name="casualEntitlement"
+                                  min="0"
+                                  defaultValue={settings.casualEntitlement ?? 12}
+                                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-slate-900 bg-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Sick Leave (SL)</label>
+                                <input
+                                  type="number"
+                                  name="sickEntitlement"
+                                  min="0"
+                                  defaultValue={settings.sickEntitlement ?? 10}
+                                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-slate-900 bg-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Earned Leave (EL)</label>
+                                <input
+                                  type="number"
+                                  name="earnedEntitlement"
+                                  min="0"
+                                  defaultValue={settings.earnedEntitlement ?? 15}
+                                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-slate-900 bg-white"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Compensatory Leave (CO)</label>
+                                <input
+                                  type="number"
+                                  name="compensatoryEntitlement"
+                                  min="0"
+                                  defaultValue={settings.compensatoryEntitlement ?? 0}
+                                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-slate-900 bg-white"
+                                />
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1986,6 +2357,54 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                 </div>
               )}
 
+              {!employeeModal.user && (
+                <div className="border-t border-slate-100 pt-4 space-y-3">
+                  <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Initial Leave Balances</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] text-slate-500 mb-1">Casual Leave (CL)</label>
+                      <input
+                        type="number"
+                        name="casualBalance"
+                        min="0"
+                        defaultValue={settings?.casualEntitlement ?? 12}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-slate-900 bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-500 mb-1">Sick Leave (SL)</label>
+                      <input
+                        type="number"
+                        name="sickBalance"
+                        min="0"
+                        defaultValue={settings?.sickEntitlement ?? 10}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-slate-900 bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-500 mb-1">Earned Leave (EL)</label>
+                      <input
+                        type="number"
+                        name="earnedBalance"
+                        min="0"
+                        defaultValue={settings?.earnedEntitlement ?? 15}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-slate-900 bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-500 mb-1">Compensatory Leave (CO)</label>
+                      <input
+                        type="number"
+                        name="compensatoryBalance"
+                        min="0"
+                        defaultValue={settings?.compensatoryEntitlement ?? 0}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-xs outline-none focus:border-slate-900 bg-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="flex gap-2 pt-4">
                 <button
                   type="submit"
@@ -2275,6 +2694,190 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                 </button>
               </div>
             </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Single Leave Balance Adjustment Modal */}
+      {adjustBalanceModal.open && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-white rounded-2xl border border-slate-200 w-full max-w-sm overflow-hidden shadow-2xl"
+          >
+            <div className="px-5 py-3.5 bg-slate-900 text-white flex items-center justify-between">
+              <h3 className="font-bold text-base">Adjust Leave Balance</h3>
+              <button onClick={() => setAdjustBalanceModal({ open: false })} className="text-slate-400 hover:text-white transition">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleSingleBalanceAdjustment} className="p-5 space-y-4">
+              <div className="text-xs text-slate-600">
+                Adjusting leave balance for <strong className="text-slate-800">{adjustBalanceModal.employeeName}</strong>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Leave Type</label>
+                <select
+                  required
+                  name="leaveType"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none bg-white focus:border-slate-900"
+                >
+                  <option value="casualBalance">Casual Leave (CL)</option>
+                  <option value="sickBalance">Sick Leave (SL)</option>
+                  <option value="earnedBalance">Earned Leave (EL)</option>
+                  <option value="compensatoryBalance">Compensatory Leave (CO)</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Action</label>
+                  <select
+                    required
+                    name="action"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none bg-white focus:border-slate-900"
+                  >
+                    <option value="INCREASE">Increase (+)</option>
+                    <option value="DECREASE">Decrease (-)</option>
+                    <option value="SET">Set Explicitly (=)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Days</label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    step="0.5"
+                    name="amount"
+                    placeholder="e.g. 2"
+                    className="w-full border border-slate-200 rounded-xl px-3.5 py-1.5 text-sm outline-none focus:border-slate-900 bg-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Adjustment Reason</label>
+                <textarea
+                  required
+                  name="reason"
+                  placeholder="e.g. Compensation for weekend duty, manual addition, error correction"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-slate-900"
+                  rows={2}
+                ></textarea>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={operationLoading}
+                  className="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm py-2.5 rounded-xl transition"
+                >
+                  Apply Change
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdjustBalanceModal({ open: false })}
+                  className="flex-1 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-sm py-2.5 rounded-xl transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Bulk Leave Balance Adjustment Modal */}
+      {bulkBalanceModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-white rounded-2xl border border-slate-200 w-full max-w-sm overflow-hidden shadow-2xl"
+          >
+            <div className="px-5 py-3.5 bg-slate-900 text-white flex items-center justify-between">
+              <h3 className="font-bold text-base">Bulk Leave Adjustments</h3>
+              <button onClick={() => setBulkBalanceModal(false)} className="text-slate-400 hover:text-white transition">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleBulkBalanceAdjustment} className="p-5 space-y-4">
+              <div className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-xl p-3">
+                Bulk adjusting available balances for <strong className="text-slate-800">{selectedEmpIds.length} selected employees</strong>.
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Leave Type</label>
+                <select
+                  required
+                  name="leaveType"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none bg-white focus:border-slate-900"
+                >
+                  <option value="casualBalance">Casual Leave (CL)</option>
+                  <option value="sickBalance">Sick Leave (SL)</option>
+                  <option value="earnedBalance">Earned Leave (EL)</option>
+                  <option value="compensatoryBalance">Compensatory Leave (CO)</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Action</label>
+                  <select
+                    required
+                    name="action"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none bg-white focus:border-slate-900"
+                  >
+                    <option value="INCREASE">Increase (+)</option>
+                    <option value="DECREASE">Decrease (-)</option>
+                    <option value="SET">Set Explicitly (=)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Days</label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    step="0.5"
+                    name="amount"
+                    placeholder="e.g. 1.5"
+                    className="w-full border border-slate-200 rounded-xl px-3.5 py-1.5 text-sm outline-none focus:border-slate-900 bg-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Bulk Adjustment Reason</label>
+                <textarea
+                  required
+                  name="reason"
+                  placeholder="e.g. Yearly entitlement increment, bulk manual addition"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-slate-900"
+                  rows={2}
+                ></textarea>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={operationLoading}
+                  className="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-sm py-2.5 rounded-xl transition"
+                >
+                  Apply to Selected
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkBalanceModal(false)}
+                  className="flex-1 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-sm py-2.5 rounded-xl transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
           </motion.div>
         </div>
       )}
