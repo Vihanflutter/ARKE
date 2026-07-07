@@ -687,9 +687,9 @@ async function startServer() {
       const userId = req.params.id;
       const body = z.object({
         leaveType: z.enum(['CASUAL_LEAVE', 'SICK_LEAVE', 'EARNED_LEAVE', 'COMPENSATORY_LEAVE']),
-        action: z.enum(['increase', 'decrease', 'set']),
+        action: z.enum(['increase', 'decrease', 'set']).optional().default('set'),
         amount: z.number().nonnegative('Amount must be non-negative'),
-        reason: z.string().min(1, 'Reason is required'),
+        reason: z.string().optional().default('Assigned by Admin'),
         changedById: z.string(),
         changedByName: z.string()
       }).parse(req.body);
@@ -753,9 +753,9 @@ async function startServer() {
       const body = z.object({
         userIds: z.array(z.string()),
         leaveType: z.enum(['CASUAL_LEAVE', 'SICK_LEAVE', 'EARNED_LEAVE', 'COMPENSATORY_LEAVE']),
-        action: z.enum(['increase', 'decrease', 'set']),
+        action: z.enum(['increase', 'decrease', 'set']).optional().default('set'),
         amount: z.number().nonnegative(),
-        reason: z.string().min(1, 'Reason is required'),
+        reason: z.string().optional().default('Bulk Assigned by Admin'),
         changedById: z.string(),
         changedByName: z.string()
       }).parse(req.body);

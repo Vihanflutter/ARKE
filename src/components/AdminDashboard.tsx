@@ -466,9 +466,9 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
     const userId = adjustBalanceModal.userId;
     const body = {
       leaveType: formData.get('leaveType') as string,
-      action: formData.get('action') as string,
+      action: 'set',
       amount: Number(formData.get('amount') || 0),
-      reason: formData.get('reason') as string,
+      reason: 'Assigned by Admin',
       changedById: currentUser.id,
       changedByName: currentUser.name,
     };
@@ -496,9 +496,9 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
     const body = {
       userIds: selectedEmpIds,
       leaveType: formData.get('leaveType') as string,
-      action: formData.get('action') as string,
+      action: 'set',
       amount: Number(formData.get('amount') || 0),
-      reason: formData.get('reason') as string,
+      reason: 'Bulk Assigned by Admin',
       changedById: currentUser.id,
       changedByName: currentUser.name,
     };
@@ -2707,14 +2707,14 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
             className="bg-white rounded-2xl border border-slate-200 w-full max-w-sm overflow-hidden shadow-2xl"
           >
             <div className="px-5 py-3.5 bg-slate-900 text-white flex items-center justify-between">
-              <h3 className="font-bold text-base">Adjust Leave Balance</h3>
+              <h3 className="font-bold text-base">Assign Leave Balance</h3>
               <button onClick={() => setAdjustBalanceModal({ open: false })} className="text-slate-400 hover:text-white transition">
                 <XCircle className="w-5 h-5" />
               </button>
             </div>
             <form onSubmit={handleSingleBalanceAdjustment} className="p-5 space-y-4">
               <div className="text-xs text-slate-600">
-                Adjusting leave balance for <strong className="text-slate-800">{adjustBalanceModal.employeeName}</strong>
+                Assigning leave balance for <strong className="text-slate-800">{adjustBalanceModal.employeeName}</strong>
               </div>
 
               <div>
@@ -2724,52 +2724,27 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                   name="leaveType"
                   className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none bg-white focus:border-slate-900"
                 >
-                  <option value="casualBalance">Casual Leave (CL)</option>
-                  <option value="sickBalance">Sick Leave (SL)</option>
-                  <option value="earnedBalance">Earned Leave (EL)</option>
-                  <option value="compensatoryBalance">Compensatory Leave (CO)</option>
+                  <option value="CASUAL_LEAVE">Casual Leave (CL)</option>
+                  <option value="SICK_LEAVE">Sick Leave (SL)</option>
+                  <option value="EARNED_LEAVE">Earned Leave (EL)</option>
+                  <option value="COMPENSATORY_LEAVE">Compensatory Leave (CO)</option>
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Action</label>
-                  <select
-                    required
-                    name="action"
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none bg-white focus:border-slate-900"
-                  >
-                    <option value="INCREASE">Increase (+)</option>
-                    <option value="DECREASE">Decrease (-)</option>
-                    <option value="SET">Set Explicitly (=)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Days</label>
-                  <input
-                    type="number"
-                    required
-                    min="0"
-                    step="0.5"
-                    name="amount"
-                    placeholder="e.g. 2"
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-1.5 text-sm outline-none focus:border-slate-900 bg-white"
-                  />
-                </div>
-              </div>
-
               <div>
-                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Adjustment Reason</label>
-                <textarea
+                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">New Balance (Days)</label>
+                <input
+                  type="number"
                   required
-                  name="reason"
-                  placeholder="e.g. Compensation for weekend duty, manual addition, error correction"
-                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-slate-900"
-                  rows={2}
-                ></textarea>
+                  min="0"
+                  step="0.5"
+                  name="amount"
+                  placeholder="e.g. 15"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-slate-900 bg-white"
+                />
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 pt-2">
                 <button
                   type="submit"
                   disabled={operationLoading}
@@ -2799,14 +2774,14 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
             className="bg-white rounded-2xl border border-slate-200 w-full max-w-sm overflow-hidden shadow-2xl"
           >
             <div className="px-5 py-3.5 bg-slate-900 text-white flex items-center justify-between">
-              <h3 className="font-bold text-base">Bulk Leave Adjustments</h3>
+              <h3 className="font-bold text-base">Bulk Assign Leave Balance</h3>
               <button onClick={() => setBulkBalanceModal(false)} className="text-slate-400 hover:text-white transition">
                 <XCircle className="w-5 h-5" />
               </button>
             </div>
             <form onSubmit={handleBulkBalanceAdjustment} className="p-5 space-y-4">
               <div className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-xl p-3">
-                Bulk adjusting available balances for <strong className="text-slate-800">{selectedEmpIds.length} selected employees</strong>.
+                Bulk assigning available balances for <strong className="text-slate-800">{selectedEmpIds.length} selected employees</strong>.
               </div>
 
               <div>
@@ -2816,52 +2791,27 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                   name="leaveType"
                   className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none bg-white focus:border-slate-900"
                 >
-                  <option value="casualBalance">Casual Leave (CL)</option>
-                  <option value="sickBalance">Sick Leave (SL)</option>
-                  <option value="earnedBalance">Earned Leave (EL)</option>
-                  <option value="compensatoryBalance">Compensatory Leave (CO)</option>
+                  <option value="CASUAL_LEAVE">Casual Leave (CL)</option>
+                  <option value="SICK_LEAVE">Sick Leave (SL)</option>
+                  <option value="EARNED_LEAVE">Earned Leave (EL)</option>
+                  <option value="COMPENSATORY_LEAVE">Compensatory Leave (CO)</option>
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Action</label>
-                  <select
-                    required
-                    name="action"
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none bg-white focus:border-slate-900"
-                  >
-                    <option value="INCREASE">Increase (+)</option>
-                    <option value="DECREASE">Decrease (-)</option>
-                    <option value="SET">Set Explicitly (=)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Days</label>
-                  <input
-                    type="number"
-                    required
-                    min="0"
-                    step="0.5"
-                    name="amount"
-                    placeholder="e.g. 1.5"
-                    className="w-full border border-slate-200 rounded-xl px-3.5 py-1.5 text-sm outline-none focus:border-slate-900 bg-white"
-                  />
-                </div>
-              </div>
-
               <div>
-                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Bulk Adjustment Reason</label>
-                <textarea
+                <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">New Balance (Days)</label>
+                <input
+                  type="number"
                   required
-                  name="reason"
-                  placeholder="e.g. Yearly entitlement increment, bulk manual addition"
-                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-slate-900"
-                  rows={2}
-                ></textarea>
+                  min="0"
+                  step="0.5"
+                  name="amount"
+                  placeholder="e.g. 15"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm outline-none focus:border-slate-900 bg-white"
+                />
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 pt-2">
                 <button
                   type="submit"
                   disabled={operationLoading}
