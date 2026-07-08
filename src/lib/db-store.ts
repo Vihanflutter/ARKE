@@ -220,6 +220,13 @@ function selfHealDatabase(dbData: DatabaseSchema) {
   recalculateAllAttendances(dbData);
 }
 
+export function resolveHalfDay(punchInStr?: string): 'HALF_DAY_1' | 'HALF_DAY_2' {
+  if (!punchInStr) return 'HALF_DAY_1';
+  const [h] = punchInStr.split(':').map(Number);
+  if (isNaN(h)) return 'HALF_DAY_1';
+  return h < 15 ? 'HALF_DAY_1' : 'HALF_DAY_2';
+}
+
 // Recalculates all attendance statuses based on the company's working hour thresholds
 export function recalculateAllAttendances(dbData: DatabaseSchema): boolean {
   if (!dbData || !Array.isArray(dbData.attendances)) return false;
@@ -231,11 +238,11 @@ export function recalculateAllAttendances(dbData: DatabaseSchema): boolean {
   let modified = false;
   dbData.attendances.forEach(a => {
     if (a.punchIn && a.punchOut && a.workingHours !== undefined) {
-      let expectedStatus: 'PRESENT' | 'HALF_DAY' | 'LEAVE' = 'PRESENT';
+      let expectedStatus: 'PRESENT' | 'HALF_DAY_1' | 'HALF_DAY_2' | 'LEAVE' = 'PRESENT';
       if (a.workingHours >= fullDayThreshold) {
         expectedStatus = 'PRESENT';
       } else if (a.workingHours >= halfDayThreshold) {
-        expectedStatus = 'HALF_DAY';
+        expectedStatus = resolveHalfDay(a.punchIn);
       } else {
         expectedStatus = 'LEAVE';
       }
@@ -530,11 +537,11 @@ export const db = {
       const fullDayThreshold = 8.0;
       return dbData.attendances.map(a => {
         if (a.punchIn && a.punchOut && a.workingHours !== undefined) {
-          let expectedStatus: 'PRESENT' | 'HALF_DAY' | 'LEAVE' = 'PRESENT';
+          let expectedStatus: 'PRESENT' | 'HALF_DAY_1' | 'HALF_DAY_2' | 'LEAVE' = 'PRESENT';
           if (a.workingHours >= fullDayThreshold) {
             expectedStatus = 'PRESENT';
           } else if (a.workingHours >= halfDayThreshold) {
-            expectedStatus = 'HALF_DAY';
+            expectedStatus = resolveHalfDay(a.punchIn);
           } else {
             expectedStatus = 'LEAVE';
           }
@@ -557,8 +564,11 @@ export const db = {
       const computedStatus = (workingHours: number, originalStatus?: string, punchIn?: string, punchOut?: string): string => {
         if (punchIn && punchOut) {
           if (workingHours >= fullDayThreshold) return 'PRESENT';
-          if (workingHours >= halfDayThreshold) return 'HALF_DAY';
+          if (workingHours >= halfDayThreshold) return resolveHalfDay(punchIn);
           return 'LEAVE';
+        }
+        if (originalStatus === 'HALF_DAY' || originalStatus === 'HALF_DAY_1' || originalStatus === 'HALF_DAY_2') {
+          return originalStatus === 'HALF_DAY' ? resolveHalfDay(punchIn) : originalStatus;
         }
         return originalStatus || 'ABSENT';
       };
@@ -785,10 +795,12 @@ export const db = {
       if (attendance.workingHours >= fullDayThreshold) {
         calculatedStatus = 'PRESENT';
       } else if (attendance.workingHours >= halfDayThreshold) {
-        calculatedStatus = 'HALF_DAY';
+        calculatedStatus = resolveHalfDay(attendance.punchIn);
       } else {
         calculatedStatus = 'LEAVE';
       }
+    } else if (calculatedStatus === 'HALF_DAY') {
+      calculatedStatus = resolveHalfDay(attendance.punchIn);
     }
 
     const userRaw = dbData.users.find(u => u.id === attendance.userId);

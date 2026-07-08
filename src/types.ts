@@ -2,7 +2,7 @@ export type Role = 'ADMIN' | 'MANAGER' | 'EMPLOYEE';
 
 export type EmployeeStatus = 'ACTIVE' | 'INACTIVE';
 
-export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'HALF_DAY' | 'LEAVE';
+export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'HALF_DAY' | 'HALF_DAY_1' | 'HALF_DAY_2' | 'LEAVE';
 
 export type LeaveType = 'CASUAL_LEAVE' | 'SICK_LEAVE' | 'EARNED_LEAVE' | 'COMPENSATORY_LEAVE';
 

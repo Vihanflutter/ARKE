@@ -27,7 +27,7 @@ function calculateSummary(logs: HydratedAttendance[]): ReportSummary {
     if (a.status === 'PRESENT') presentDays++;
     else if (a.status === 'ABSENT') absentDays++;
     else if (a.status === 'LEAVE') leaveDays++;
-    else if (a.status === 'HALF_DAY') halfDays++;
+    else if (a.status?.startsWith('HALF_DAY')) halfDays++;
     
     if (a.late > 0) lateDays++;
   });
@@ -191,7 +191,7 @@ export async function exportToExcel(
     } else if (log.status === 'LEAVE') {
       statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'DBEAFE' } };
       statusCell.font = { color: { argb: '1E40AF' }, bold: true };
-    } else if (log.status === 'HALF_DAY') {
+    } else if (log.status?.startsWith('HALF_DAY')) {
       statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FEF3C7' } };
       statusCell.font = { color: { argb: '92400E' }, bold: true };
     }
@@ -394,7 +394,7 @@ export function exportToPDF(
         } else if (val === 'LEAVE') {
           data.cell.styles.textColor = [30, 64, 175];
           data.cell.styles.fontStyle = 'bold';
-        } else if (val === 'HALF_DAY') {
+        } else if (typeof val === 'string' && val.startsWith('HALF_DAY')) {
           data.cell.styles.textColor = [146, 64, 14];
           data.cell.styles.fontStyle = 'bold';
         }
@@ -560,7 +560,7 @@ export async function exportMonthlyRegisterToExcel(
       shift = isAbsentOrLeave ? 'X' : 'G';
 
       if (att.status === 'PRESENT') presentCount++;
-      else if (att.status === 'HALF_DAY') halfDayCount++;
+      else if (att.status?.startsWith('HALF_DAY')) halfDayCount++;
       else if (att.status === 'LEAVE') leaveCount++;
       else if (att.status === 'ABSENT') absentCount++;
 
@@ -640,7 +640,7 @@ export async function exportMonthlyRegisterToExcel(
           cell.font = { name: 'Arial', size: 8, bold: true, color: { argb: 'DC2626' } };
         } else if (status === 'LEAVE') {
           cell.font = { name: 'Arial', size: 8, bold: true, color: { argb: '2563EB' } };
-        } else if (status === 'HALF_DAY') {
+        } else if (status?.startsWith('HALF_DAY')) {
           cell.font = { name: 'Arial', size: 8, bold: true, color: { argb: 'D97706' } };
         }
       }
@@ -808,7 +808,7 @@ export function exportMonthlyRegisterToPDF(
       shift = isAbsentOrLeave ? 'X' : 'G';
 
       if (att.status === 'PRESENT') presentCount++;
-      else if (att.status === 'HALF_DAY') halfDayCount++;
+      else if (att.status?.startsWith('HALF_DAY')) halfDayCount++;
       else if (att.status === 'LEAVE') leaveCount++;
       else if (att.status === 'ABSENT') absentCount++;
 
@@ -896,7 +896,7 @@ export function exportMonthlyRegisterToPDF(
         } else if (val === 'LEAVE') {
           data.cell.styles.textColor = [37, 99, 235];
           data.cell.styles.fontStyle = 'bold';
-        } else if (val === 'HALF_DAY') {
+        } else if (typeof val === 'string' && val.startsWith('HALF_DAY')) {
           data.cell.styles.textColor = [217, 119, 6];
           data.cell.styles.fontStyle = 'bold';
         }
@@ -996,7 +996,7 @@ export async function exportCompanyWideToExcel(
           rowValues.push('P');
           pCount++;
           totalHrs += log.workingHours || 0;
-        } else if (log.status === 'HALF_DAY') {
+        } else if (log.status?.startsWith('HALF_DAY')) {
           rowValues.push('HD');
           pCount += 0.5;
           totalHrs += log.workingHours || 0;
@@ -1117,7 +1117,7 @@ export function exportCompanyWideToPDF(
           row.push('P');
           pCount++;
           totalHrs += log.workingHours || 0;
-        } else if (log.status === 'HALF_DAY') {
+        } else if (log.status?.startsWith('HALF_DAY')) {
           row.push('HD');
           pCount += 0.5;
           totalHrs += log.workingHours || 0;

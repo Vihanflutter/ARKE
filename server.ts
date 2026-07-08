@@ -108,7 +108,7 @@ async function startServer() {
 
       const attendancesToday = db.attendances.findMany().filter(a => a.date === dateStr);
       
-      const presentToday = attendancesToday.filter(a => a.status === 'PRESENT' || a.status === 'HALF_DAY').length;
+      const presentToday = attendancesToday.filter(a => a.status === 'PRESENT' || a.status === 'HALF_DAY' || a.status === 'HALF_DAY_1' || a.status === 'HALF_DAY_2').length;
       const absentToday = attendancesToday.filter(a => a.status === 'ABSENT').length;
       const onLeaveToday = attendancesToday.filter(a => a.status === 'LEAVE').length;
 
@@ -399,7 +399,7 @@ async function startServer() {
     date: z.string(), // YYYY-MM-DD
     punchIn: z.string().nullable().optional(), // HH:MM
     punchOut: z.string().nullable().optional(), // HH:MM
-    status: z.enum(['PRESENT', 'ABSENT', 'HALF_DAY', 'LEAVE']),
+    status: z.enum(['PRESENT', 'ABSENT', 'HALF_DAY', 'HALF_DAY_1', 'HALF_DAY_2', 'LEAVE']),
     remarks: z.string().nullable().optional(),
   });
 

@@ -982,10 +982,10 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                                       <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-bold border ${
                                         log.status === 'PRESENT' ? 'bg-green-50 text-green-700 border-green-100' :
                                         log.status === 'ABSENT' ? 'bg-red-50 text-red-700 border-red-100' :
-                                        log.status === 'HALF_DAY' ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                                        log.status?.startsWith('HALF_DAY') ? 'bg-amber-50 text-amber-700 border-amber-100' :
                                         'bg-blue-50 text-blue-700 border-blue-100'
                                       }`}>
-                                        {log.status}
+                                        {log.status === 'HALF_DAY_1' ? 'Half Day 1' : log.status === 'HALF_DAY_2' ? 'Half Day 2' : log.status === 'HALF_DAY' ? 'Half Day' : log.status}
                                       </span>
                                     </td>
                                   </tr>
@@ -1304,10 +1304,10 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                                     <span className={`inline-block px-2.5 py-0.5 rounded text-[10px] font-bold border ${
                                       log.status === 'PRESENT' ? 'bg-green-50 text-green-700 border-green-100' :
                                       log.status === 'ABSENT' ? 'bg-red-50 text-red-700 border-red-100' :
-                                      log.status === 'HALF_DAY' ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                                      log.status?.startsWith('HALF_DAY') ? 'bg-amber-50 text-amber-700 border-amber-100' :
                                       'bg-blue-50 text-blue-700 border-blue-100'
                                     }`}>
-                                      {log.status}
+                                      {log.status === 'HALF_DAY_1' ? 'Half Day 1' : log.status === 'HALF_DAY_2' ? 'Half Day 2' : log.status === 'HALF_DAY' ? 'Half Day' : log.status}
                                     </span>
                                   </td>
                                   <td className="px-5 py-3.5 text-slate-500 max-w-[150px] truncate text-xs">{log.remarks || '-'}</td>
@@ -2479,7 +2479,9 @@ export default function AdminDashboard({ currentUser, onLogout }: AdminDashboard
                   >
                     <option value="PRESENT">Present</option>
                     <option value="ABSENT">Absent</option>
-                    <option value="HALF_DAY">Half Day</option>
+                    <option value="HALF_DAY">Half Day (Auto-resolve)</option>
+                    <option value="HALF_DAY_1">Half Day 1 (Before 3:00 PM)</option>
+                    <option value="HALF_DAY_2">Half Day 2 (After 3:00 PM)</option>
                     <option value="LEAVE">Leave</option>
                   </select>
                 </div>
